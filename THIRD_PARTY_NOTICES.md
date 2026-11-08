@@ -18,8 +18,8 @@ CleanHome's design, motion, palette, several icon drawings and the built-in wall
 
 The 14 built-in wallpapers are Unsplash photographs used under the [Unsplash License](https://unsplash.com/license).
 Photographer and source for each are in [`app/assets/wallpapers/PHOTO-CREDIT.md`](app/assets/wallpapers/PHOTO-CREDIT.md).
-Photographers retain their rights. Wallpapers downloaded at runtime (Google's Chromecast ambient gallery, Bing's photo
-of the day) are fetched from those services and are not part of this repository.
+Photographers retain their rights. Wallpapers shown at runtime (Google's Chromecast ambient feed, Google Arts & Culture artworks credited to their
+museums, Bing's photo of the day) are fetched live from those services and are not part of this repository.
 
 ## Icons and trademarks
 

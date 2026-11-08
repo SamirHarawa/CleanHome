@@ -79,9 +79,23 @@ final class Weather {
         } catch (Exception e) { return null; }
     }
 
-    static String get(String url) throws Exception {
+    static String get(String url) throws Exception { return get(url, null); }
+
+    /** Saves a URL to a file (used for live wallpapers). */
+    static void download(String url, java.io.File to) throws Exception {
         java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
-        c.setRequestProperty("User-Agent", "CleanHome/1.0 (Android TV launcher)");
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(30000);
+        try (java.io.InputStream in = c.getInputStream(); java.io.FileOutputStream out = new java.io.FileOutputStream(to)) {
+            if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+            byte[] buf = new byte[32768];
+            for (int k; (k = in.read(buf)) > 0; ) out.write(buf, 0, k);
+        } finally { c.disconnect(); }
+    }
+
+    static String get(String url, String userAgent) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setRequestProperty("User-Agent", userAgent != null ? userAgent : "CleanHome/1.0 (Android TV launcher)");
         c.setConnectTimeout(8000);
         c.setReadTimeout(10000);
         try (java.io.InputStream in = c.getInputStream()) {

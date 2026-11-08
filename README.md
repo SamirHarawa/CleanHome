@@ -13,7 +13,7 @@ Assistant voice button, Chromecast, AirPlay, the Play Store, your accounts and a
 
 - **Big clock, date and live weather** for your area, with colour weather icons.
 - **A dock of up to 6 favourite apps** with consistent brand-coloured logos, for every app, including ones you install later.
-- **Changing wallpapers**: Google's own Chromecast ambient photos in 4K (a new one every 15 minutes), Bing's photo of the day, or a built-in set.
+- **Live wallpapers from Google**: a new picture every 15 minutes, straight from the internet and never the same one twice - Google's Chromecast ambient photos and Google Arts & Culture masterpieces (or art only). Bing's photo of the day and a built-in set are there too.
 - **Smooth, gentle animations** and the familiar navigation sounds.
 - **All apps** in a neat, evenly spaced grid. Hold OK on any app to add it to (or remove it from) the dock.
 - **Search** for apps, or search Google TV and YouTube, by typing or by voice.
@@ -74,7 +74,7 @@ CleanHome and returns your TV to the normal Google TV home.
 ## Good to know
 
 - **Privacy.** CleanHome has no accounts, ads or analytics. It only goes online to fetch wallpapers (Google's
-  Chromecast photo gallery and Bing) and the weather (an approximate location from your internet connection via
+  Chromecast ambient feed, Google Arts & Culture and Bing) and the weather (an approximate location from your internet connection via
   ipwho.is, and the forecast from Open-Meteo). Details in [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
 - **Updates.** Google TV system updates keep working. To update CleanHome, run the installer again.
 - **Tested on** a TCL Google TV (Android 14). It is built for any Google TV running Android 9 or later; other brands

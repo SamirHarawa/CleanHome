@@ -184,7 +184,7 @@ public class HomeActivity extends Activity {
     /** Fires right on each minute boundary, so the clock changes exactly when the minute does. */
     Runnable minute;
     { minute = () -> { updateClock(); h.postDelayed(minute, 60_000 - System.currentTimeMillis() % 60_000 + 30); }; }
-    { tick = () -> { updateClock(); refreshWeather(); fetchDaily(false); fetchGallery(false); if (overlay.getVisibility() != View.VISIBLE) applyWallpaper(false); h.postDelayed(tick, 15000); }; }
+    { tick = () -> { updateClock(); refreshWeather(); fetchDaily(false); liveTick(false); if (overlay.getVisibility() != View.VISIBLE) applyWallpaper(false); h.postDelayed(tick, 15000); }; }
     final Runnable hideToast = () -> toast.animate().alpha(0f).translationY(-px(8)).setDuration(220).start();
 
     int px(float v) { return Math.round(v * s); }
@@ -198,6 +198,7 @@ public class HomeActivity extends Activity {
         SH = getResources().getDisplayMetrics().heightPixels;
         s = SW / 1920f;
         prefs = getSharedPreferences("home", MODE_PRIVATE);
+        liveWall = new LiveWall(getFilesDir(), prefs);
         if (prefs.getInt("dockv", 0) < DOCK_VERSION) {
             prefs.edit().remove("dock").putInt("dockv", DOCK_VERSION).putString("wall", "daily").apply();
         }
@@ -340,7 +341,7 @@ public class HomeActivity extends Activity {
         loadApps();
         buildDock();
         fetchDaily(false);
-        fetchGallery(false);
+        liveTick(false);
         refreshAvatar();
         applyWallpaper(true);
         h.removeCallbacks(tick);
@@ -546,12 +547,26 @@ public class HomeActivity extends Activity {
         return set[c.get(Calendar.DAY_OF_YEAR) % set.length];
     }
 
-    static final long ROTATE_MS = 15 * 60_000L;
+    static final long ROTATE_MS = LiveWall.ROTATE_MS;
+    LiveWall liveWall;
+
+    static boolean isLiveMode(String w) { return "google".equals(w) || "googleart".equals(w); }
+
+    /** Keeps the live Google wallpaper moving: a new picture every 15 minutes, the next one always ready. */
+    void liveTick(boolean force) {
+        String w = prefs.getString("wall", "auto");
+        if (!isLiveMode(w) || liveWall == null) return;
+        liveWall.tick("googleart".equals(w), force, () -> h.post(() -> {
+            if (overlay.getVisibility() != View.VISIBLE) applyWallpaper(false);
+        }));
+    }
 
     String wantedWall() {
         String w = prefs.getString("wall", "auto");
-        if ("google".equals(w)) {
-            List<String[]> g = galleryList();
+        if (isLiveMode(w)) {
+            LiveWall.Pic c = liveWall.current();
+            if (c != null) return "live:" + c.file;
+            List<String[]> g = galleryList(); // until the first live picture arrives
             if (!g.isEmpty()) return "gal:" + g.get((int) ((System.currentTimeMillis() / ROTATE_MS) % g.size()))[0];
             List<String[]> d = dailyList();
             return d.isEmpty() ? autoWall() : "bing:" + d.get(0)[0];
@@ -784,7 +799,7 @@ public class HomeActivity extends Activity {
             if (my != gen) return;
             Frost.Small matBlur = Frost.blurred(sm, MAT_BLUR * s);
             float lumMat = Frost.lum(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_X + DOCK_W), px(DOCK_Y + DOCK_H));
-            float base = (id.startsWith("bing:") || id.startsWith("gal:")) ? .20f : WALL_VEIL[wallIndex(id)];
+            float base = (id.startsWith("bing:") || id.startsWith("gal:") || id.startsWith("live:")) ? .20f : WALL_VEIL[wallIndex(id)];
             L.veil = Math.min(.62f, base + .30f * Frost.smooth(.42f, .85f, lumMat));
             L.mat = Frost.region(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_W), px(DOCK_H), s, true);
             h.post(() -> { remember(L); if (id.equals(currentWall)) present(L, instant); });
@@ -810,8 +825,8 @@ public class HomeActivity extends Activity {
 
     Bitmap decodeWall(String id) {
         try {
-            if (id.startsWith("bing:") || id.startsWith("gal:")) {
-                File f = id.startsWith("gal:") ? galFile(id.substring(4)) : dailyFile(id.substring(5));
+            if (id.startsWith("bing:") || id.startsWith("gal:") || id.startsWith("live:")) {
+                File f = id.startsWith("gal:") ? galFile(id.substring(4)) : id.startsWith("live:") ? galFile(id.substring(5)) : dailyFile(id.substring(5));
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 o.inJustDecodeBounds = true;
                 BitmapFactory.decodeFile(f.getPath(), o);
@@ -1541,16 +1556,20 @@ public class HomeActivity extends Activity {
 
         String pref = prefs.getString("wall", "auto");
         List<TextView> rows = new ArrayList<>();
-        List<String[]> gal = galleryList();
-        String galNow = gal.isEmpty() ? null : gal.get((int) ((System.currentTimeMillis() / ROTATE_MS) % gal.size()))[0];
-        String galBy = "";
-        for (String[] x : gal) if (x[0].equals(galNow)) galBy = x[1];
-        final String galCredit = gal.isEmpty() ? "Google's ambient photos are downloading…" : "Google ambient · changes every 15 minutes · photo by " + galBy;
-        TextView googleRow = sheetRow(("google".equals(pref) ? "✓  " : "     ") + "Google ambient (changing)", g, () -> pick("google"));
+        LiveWall.Pic liveNow = liveWall.current();
+        final String liveId = liveNow == null ? null : "live:" + liveNow.file;
+        final String liveCredit = (liveNow == null ? "Fetching the first picture from Google…" : "Now: " + liveNow.credit)
+                + "\nA new picture every 15 minutes, live from Google - never the same one twice.";
+        TextView googleRow = sheetRow(("google".equals(pref) ? "✓  " : "     ") + "Google ambient & art (live)", g, () -> pick("google"));
         googleRow.setOnFocusChangeListener(chain(googleRow.getOnFocusChangeListener(), f -> {
-            if (f) { if (galNow != null) showWall("gal:" + galNow, false); sub.setText(galCredit); }
+            if (f) { if (liveId != null) showWall(liveId, false); sub.setText(liveCredit); }
         }));
         rows.add(googleRow);
+        TextView artRow = sheetRow(("googleart".equals(pref) ? "✓  " : "     ") + "Google Arts & Culture (live)", g, () -> pick("googleart"));
+        artRow.setOnFocusChangeListener(chain(artRow.getOnFocusChangeListener(), f -> {
+            if (f) { if (liveId != null) showWall(liveId, false); sub.setText((liveNow == null ? "" : "Now: " + liveNow.credit + "\n") + "Masterpieces from the world's museums, via Google Arts & Culture. A new one every 15 minutes."); }
+        }));
+        rows.add(artRow);
         TextView auto = sheetRow(("auto".equals(pref) ? "✓  " : "     ") + "Automatic (time of day)", g, () -> pick("auto"));
         auto.setOnFocusChangeListener(chain(auto.getOnFocusChangeListener(), f -> { if (f) { showWall(autoWall(), false); sub.setText(defSub); } }));
         rows.add(auto);
@@ -1578,11 +1597,12 @@ public class HomeActivity extends Activity {
             list.addView(r, lp);
         }
         sh.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
-        int sel = 1;
+        int sel = 2;
         if ("google".equals(pref)) sel = 0;
-        else if ("daily".equals(pref) && !daily.isEmpty()) sel = 2;
-        else if (pref.startsWith("bing:")) { for (int i = 1; i < daily.size(); i++) if (pref.equals("bing:" + daily.get(i)[0])) sel = 2 + i; }
-        else if (!"auto".equals(pref) && !"daily".equals(pref)) sel = bundledStart + wallIndex(pref);
+        else if ("googleart".equals(pref)) sel = 1;
+        else if ("daily".equals(pref) && !daily.isEmpty()) sel = 3;
+        else if (pref.startsWith("bing:")) { for (int i = 1; i < daily.size(); i++) if (pref.equals("bing:" + daily.get(i)[0])) sel = 3 + i; }
+        else if (!"auto".equals(pref) && !"daily".equals(pref) && !isLiveMode(pref)) sel = bundledStart + wallIndex(pref);
         showOverlay(sh, new FrameLayout.LayoutParams(w, MATCH, Gravity.END), SHEET_PANEL, rows.get(Math.min(sel, rows.size() - 1)));
     }
 
@@ -2111,9 +2131,11 @@ public class HomeActivity extends Activity {
     }
 
     void pick(String key) {
+        String was = prefs.getString("wall", "auto");
         prefs.edit().putString("wall", key).apply();
         dismissOverlay(false);
         applyWallpaper(false);
+        if (isLiveMode(key) && !key.equals(was)) liveTick(true); // switching style: show a new picture now
     }
 
     interface FocusFn { void on(boolean f); }

@@ -12,6 +12,7 @@ a third-party home screen to take over, so the installer and the app use a few s
 | `Frost`, `Glide`, `Motion` | Rendering: the frosted glass dock, the gliding focus highlight, and the motion curves. |
 | `AutoMark` | Turns any app's icon or banner into a clean logo in its brand colour. |
 | `Weather` | Location and forecast, with the colour weather icons. |
+| `LiveWall` | Live wallpapers: picks an unseen picture from Google's feeds every 15 minutes, keeps the next one downloaded and ready. |
 
 ## What the installer changes on the TV
 
@@ -48,6 +49,7 @@ CleanHome has no analytics, ads or accounts. It contacts only:
 | Service | Why | What it sends |
 |---|---|---|
 | `clients3.google.com` (Chromecast backdrop list) and `*.googleusercontent.com` (the photos) | Google ambient wallpapers | Nothing personal |
+| `www.gstatic.com` (artwork list) and `*.ggpht.com` (the artworks) | Google Arts & Culture wallpapers | Nothing personal |
 | `www.bing.com` | Photo of the day | Nothing personal |
 | `ipwho.is` (fallback `ipapi.co`) | Approximate location for the weather, once a day | Your public IP address, as with any website |
 | `api.open-meteo.com` | The forecast, every 30 minutes | The approximate latitude/longitude |
