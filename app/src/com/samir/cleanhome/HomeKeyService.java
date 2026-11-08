@@ -221,7 +221,43 @@ public class HomeKeyService extends AccessibilityService {
             if (e.getAction() == KeyEvent.ACTION_UP && !e.isCanceled()) goHome();
             return true;
         }
+        if (e.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP && lastWindow.contains(".dashboard.") && unstickPanelUp(e)) return true;
         return false;
+    }
+
+    /**
+     * Google's quick settings panel has a dead end: on the "Help & feedback" button at the very bottom, Up goes
+     * nowhere (the gap above it is too big for its focus search). When focus is on that bottom button, move it
+     * ourselves to the nearest item above it. Found by position, so it works in every language.
+     */
+    boolean unstickPanelUp(KeyEvent e) {
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || !GTV.contentEquals(String.valueOf(root.getPackageName()))) return false;
+            android.view.accessibility.AccessibilityNodeInfo f = root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT);
+            if (f == null) return false;
+            android.graphics.Rect fr = new android.graphics.Rect(), rr = new android.graphics.Rect();
+            f.getBoundsInScreen(fr); root.getBoundsInScreen(rr);
+            if (fr.top < rr.top + rr.height() * 0.8f) return false; // not the bottom button: Google handles Up fine
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return true;  // swallow the matching key-up too
+            android.view.accessibility.AccessibilityNodeInfo best = null;
+            int bestBottom = Integer.MIN_VALUE; long bestScore = Long.MAX_VALUE;
+            java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+            q.add(root);
+            android.graphics.Rect r = new android.graphics.Rect();
+            while (!q.isEmpty()) {
+                android.view.accessibility.AccessibilityNodeInfo n = q.poll();
+                for (int i = 0; i < n.getChildCount(); i++) { android.view.accessibility.AccessibilityNodeInfo c = n.getChild(i); if (c != null) q.add(c); }
+                if (!n.isFocusable() || !n.isVisibleToUser()) continue;
+                n.getBoundsInScreen(r);
+                if (r.bottom > fr.top || r.height() > rr.height() / 3) continue; // above the button, and not a whole list
+                long dx = Math.abs(r.centerX() - fr.centerX());
+                long score = (long) r.width() * r.height() + dx; // the smallest, closest item on the lowest row
+                if (r.bottom > bestBottom || (r.bottom == bestBottom && score < bestScore)) { best = n; bestBottom = r.bottom; bestScore = score; }
+            }
+            if (best != null) best.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS);
+            return true;
+        } catch (Exception ex) { return false; }
     }
 
     @Override
