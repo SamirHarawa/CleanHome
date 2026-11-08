@@ -410,6 +410,7 @@ public class HomeActivity extends Activity {
             if (overlay.getVisibility() == View.VISIBLE) dismissOverlay(false); else showQuickSettings();
             return;
         }
+        if (intent.hasExtra("setDock")) { applyDockExtra(intent); return; }
         if (intent.hasExtra("forceAuto")) { forceAuto = intent.getBooleanExtra("forceAuto", false); buildDock(); showApps(); return; }
         if (overlay.getVisibility() == View.VISIBLE) dismissOverlay(true);
         else focusDock(lastDockFocus);
@@ -2158,6 +2159,22 @@ public class HomeActivity extends Activity {
         String[] src = saved == null ? DEFAULT_DOCK : (saved.isEmpty() ? new String[0] : saved.split(","));
         for (String p : src) if (apps.containsKey(p) && !out.contains(p) && out.size() < MAX_DOCK) out.add(p);
         return out;
+    }
+
+    /**
+     * Sets the dock order from outside, e.g. from a computer:
+     *   adb shell am start -n com.samir.cleanhome/.HomeActivity --es setDock "com.netflix.ninja,com.google.android.youtube.tv"
+     * Apps that aren't installed yet keep their place and appear once installed.
+     */
+    void applyDockExtra(Intent intent) {
+        String v = intent.getStringExtra("setDock");
+        if (v == null) return;
+        List<String> d = new ArrayList<>();
+        for (String p : v.split(",")) { p = p.trim(); if (!p.isEmpty() && !d.contains(p) && d.size() < MAX_DOCK) d.add(p); }
+        saveDock(d);
+        lastDockFocus = 0;
+        buildDock();
+        focusDock(0);
     }
 
     void saveDock(List<String> d) { prefs.edit().putString("dock", TextUtils.join(",", d)).apply(); }
