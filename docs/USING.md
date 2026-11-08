@@ -40,6 +40,8 @@
 
 Open the **Wallpaper** icon. Moving over a choice previews it; OK keeps it; Back cancels.
 
+![The wallpaper picker](images/wallpaper.jpg)
+
 - **Google ambient photos (live)** - the default. The same kind of photos as the Google TV screensaver, fetched live from
   Google: a new one every hour, exactly on the hour (7:00, 8:00...), never repeated for months (CleanHome remembers the last 2,000 it showed). Only the
   current and next photo are kept on the TV. The list shows the photographer of the one on screen.

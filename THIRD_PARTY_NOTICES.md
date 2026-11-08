@@ -21,6 +21,9 @@ Photographer and source for each are in [`app/assets/wallpapers/PHOTO-CREDIT.md`
 Photographers retain their rights. Wallpapers shown at runtime (Google's Chromecast ambient feed, Google Arts & Culture artworks credited to their
 museums, Bing's photo of the day) are fetched live from those services and are not part of this repository.
 
+The screenshots in [`docs/images/`](docs/images/) show a photo by Enxun Wei from Google's ambient (Chromecast) feed, as it appeared
+on a TV running CleanHome; it is included only to illustrate the app, and the photographer keeps all rights.
+
 ## Icons and trademarks
 
 | Material | Terms |
