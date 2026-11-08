@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="240dp" android:height="240dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- MaxLIV: soft filled play triangle, offset outline triangle, swoosh arc on the left -->
+    <path android:fillColor="#8CFFFFFF" android:pathData="M10.2,7.4 L18.6,12.3 L10.2,17.2 Z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7"
+        android:strokeLineJoin="round" android:strokeLineCap="round" android:pathData="M7.6,4.7 L20.3,12 L7.6,19.3 Z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7"
+        android:strokeLineCap="round" android:pathData="M10.4,2.4 A9.8,9.8 0 0 0 9.4,21.4"/>
+</vector>

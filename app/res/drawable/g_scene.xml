@@ -1,0 +1,6 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="242dp" android:height="108dp" android:viewportWidth="242" android:viewportHeight="108">
+    <!-- Screensaver tile art: a low sun and soft hills, like Google TV's tile -->
+    <path android:fillColor="#40FFFFFF" android:pathData="M196,40a10,10 0 1,0 20,0a10,10 0 1,0 -20,0z"/>
+    <path android:fillColor="#26FFFFFF" android:pathData="M0,108 L0,92 C30,84 52,74 80,80 C108,86 120,70 150,68 C182,66 205,82 242,74 L242,108 Z"/>
+    <path android:fillColor="#1AFFFFFF" android:pathData="M0,108 L0,100 C40,96 70,88 110,94 C150,100 190,88 242,92 L242,108 Z"/>
+</vector>

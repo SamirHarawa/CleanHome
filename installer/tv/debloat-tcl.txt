@@ -1,0 +1,20 @@
+# TCL apps switched off by "install --debloat" (only present on TCL TVs; ignored elsewhere).
+# Tested on a TCL Google TV (Android 14): voice, Chromecast, AirPlay, Live TV inputs and
+# firmware updates (which come through Google) keep working. remove.sh turns them back on.
+com.tcl.channelplus
+com.tcl.esticker
+com.tcl.eva
+com.tcl.exhibit
+com.tcl.gamebar
+com.tcl.hotelmenu
+com.tcl.interactive
+com.tcl.logkit
+com.tcl.messagebox
+com.tcl.ocean.instructions
+com.tcl.partnercustomizer
+com.tcl.repairguide
+com.tcl.smartalexa
+com.tcl.ttvs
+com.tcl.tv.tclhome_passive
+com.tcl.usercenter
+com.tcl.waterfall.overseas

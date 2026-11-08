@@ -1,0 +1,6 @@
+# Google TV apps switched off by "install --debloat" (all brands).
+# Only feedback/telemetry and promo auto-installs. Nothing here is needed for voice, Chromecast,
+# the Play Store, account sync or system updates. remove.sh turns them back on.
+android.autoinstalls.config.google.gtvpai
+com.android.tv.feedbackconsent
+com.google.android.feedback

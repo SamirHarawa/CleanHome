@@ -1,0 +1,11 @@
+# build output and signing keys
+app/build/
+*.apk
+*.idsig
+*.jks
+*.keystore
+dist/
+# downloaded by the installer
+installer/platform-tools/
+installer/platform-tools.zip
+.DS_Store

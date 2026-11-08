@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.samir.cleanhome">
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
+    <application android:label="CleanHome" android:icon="@drawable/banner" android:banner="@drawable/banner"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" android:allowBackup="false">
+        <activity android:name=".HomeActivity" android:exported="true" android:launchMode="singleTask"
+            android:stateNotNeeded="true" android:excludeFromRecents="true" android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|uiMode|locale|layoutDirection"
+            android:windowSoftInputMode="adjustNothing">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.HOME"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <service android:name=".HomeKeyService" android:exported="false"
+            android:label="CleanHome Home button"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/a11y"/>
+        </service>
+        <activity android:name=".PanelActivity" android:exported="true" android:excludeFromRecents="true"
+            android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.app.action.OPEN_NOTIFICATION_HANDLER_PANEL"/>
+                <action android:name="android.app.action.TOGGLE_NOTIFICATION_HANDLER_PANEL"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+        <service android:name=".NotifService" android:exported="true"
+            android:label="CleanHome quick settings"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
+        </service>
+    </application>
+</manifest>
