@@ -41,9 +41,9 @@
 Open the **Wallpaper** icon. Moving over a choice previews it; OK keeps it; Back cancels.
 
 - **Google ambient photos (live)** - the default. The same kind of photos as the Google TV screensaver, fetched live from
-  Google: a new one every 15 minutes, never repeated for weeks (CleanHome remembers the last 2,000 it showed). Only the
+  Google: a new one every hour, exactly on the hour (7:00, 8:00...), never repeated for months (CleanHome remembers the last 2,000 it showed). Only the
   current and next photo are kept on the TV. The list shows the photographer of the one on screen.
-- **Google Arts & Culture (live)** - museum masterpieces instead, also a new one every 15 minutes.
+- **Google Arts & Culture (live)** - museum masterpieces instead, also a new one every hour on the hour.
 - **Daily photo** - Bing's photo of the day, in 4K.
 - **Automatic** - built-in photos that follow the time of day (dawn, morning, midday, afternoon, golden hour, dusk, night).
 - **Any single built-in photo.**

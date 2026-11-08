@@ -183,7 +183,7 @@ public class HomeActivity extends Activity {
     Runnable tick;
     /** Fires right on each minute boundary, so the clock changes exactly when the minute does. */
     Runnable minute;
-    { minute = () -> { updateClock(); h.postDelayed(minute, 60_000 - System.currentTimeMillis() % 60_000 + 30); }; }
+    { minute = () -> { updateClock(); liveTick(false); h.postDelayed(minute, 60_000 - System.currentTimeMillis() % 60_000 + 30); }; }
     { tick = () -> { updateClock(); refreshWeather(); fetchDaily(false); liveTick(false); if (overlay.getVisibility() != View.VISIBLE) applyWallpaper(false); h.postDelayed(tick, 15000); }; }
     final Runnable hideToast = () -> toast.animate().alpha(0f).translationY(-px(8)).setDuration(220).start();
 
@@ -552,7 +552,7 @@ public class HomeActivity extends Activity {
 
     static boolean isLiveMode(String w) { return "google".equals(w) || "googleart".equals(w); }
 
-    /** Keeps the live Google wallpaper moving: a new picture every 15 minutes, the next one always ready. */
+    /** Keeps the live Google wallpaper moving: a new picture every hour on the hour, the next one always ready. */
     void liveTick(boolean force) {
         String w = prefs.getString("wall", "auto");
         if (!isLiveMode(w) || liveWall == null) return;
@@ -1538,7 +1538,7 @@ public class HomeActivity extends Activity {
         col.addView(title, new LinearLayout.LayoutParams(WRAP, px(64)));
         int slot = slotFor(Calendar.getInstance().get(Calendar.HOUR_OF_DAY));
         TextView sub = text(26, FAINT, f500, -.2f);
-        final String defSub = "Google ambient photos change every 15 minutes. Daily photo comes from Bing. Automatic follows the time of day (now: " + SLOT_NAMES[slot] + ").";
+        final String defSub = "Google ambient photos change every hour, on the hour. Daily photo comes from Bing. Automatic follows the time of day (now: " + SLOT_NAMES[slot] + ").";
         sub.setText(defSub);
         sub.setPadding(0, px(8), 0, px(24));
         col.addView(sub);
@@ -1559,7 +1559,7 @@ public class HomeActivity extends Activity {
         LiveWall.Pic liveNow = liveWall.current();
         final String liveId = liveNow == null ? null : "live:" + liveNow.file;
         final String liveCredit = (liveNow == null ? "Fetching the first picture from Google…" : "Now: " + liveNow.credit)
-                + "\nThe same photos as the Google TV screensaver. A new one every 15 minutes, live from Google - no repeats for weeks.";
+                + "\nThe same photos as the Google TV screensaver. A new one every hour, on the hour, live from Google - no repeats for weeks.";
         TextView googleRow = sheetRow(("google".equals(pref) ? "✓  " : "     ") + "Google ambient photos (live)", g, () -> pick("google"));
         googleRow.setOnFocusChangeListener(chain(googleRow.getOnFocusChangeListener(), f -> {
             if (f) { if (liveId != null) showWall(liveId, false); sub.setText(liveCredit); }
@@ -1567,7 +1567,7 @@ public class HomeActivity extends Activity {
         rows.add(googleRow);
         TextView artRow = sheetRow(("googleart".equals(pref) ? "✓  " : "     ") + "Google Arts & Culture (live)", g, () -> pick("googleart"));
         artRow.setOnFocusChangeListener(chain(artRow.getOnFocusChangeListener(), f -> {
-            if (f) { if (liveId != null) showWall(liveId, false); sub.setText((liveNow == null ? "" : "Now: " + liveNow.credit + "\n") + "Masterpieces from the world's museums, via Google Arts & Culture. A new one every 15 minutes."); }
+            if (f) { if (liveId != null) showWall(liveId, false); sub.setText((liveNow == null ? "" : "Now: " + liveNow.credit + "\n") + "Masterpieces from the world's museums, via Google Arts & Culture. A new one every hour, on the hour."); }
         }));
         rows.add(artRow);
         TextView auto = sheetRow(("auto".equals(pref) ? "✓  " : "     ") + "Automatic (time of day)", g, () -> pick("auto"));

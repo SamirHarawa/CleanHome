@@ -6,16 +6,22 @@ import android.graphics.BitmapFactory;
 import java.io.File;
 
 /**
- * Live wallpapers straight from Google, never a stored set: a new picture every 15 minutes, chosen from
+ * Live wallpapers straight from Google, never a stored set: a new picture every hour, on the hour, chosen from
  * Google's Chromecast ambient feed (a huge, constantly changing pool of photos and art) and Google Arts &
  * Culture's masterpieces. Only two pictures are ever on the TV: the one showing and the next one, which is
  * downloaded in advance so the change is instant. Everything already shown is remembered, so nothing repeats.
  */
 final class LiveWall {
-    static final long ROTATE_MS = 15 * 60_000L;
+    static final long ROTATE_MS = 60 * 60_000L;
+
+    /** Local clock hour number, so pictures change exactly at 7:00, 8:00 and so on. */
+    static long hourOf(long t) { return (t + java.util.TimeZone.getDefault().getOffset(t)) / ROTATE_MS; }
+
+    /** True once the clock has passed into a new hour since the current picture went up. */
+    boolean hourTurned() { return hourOf(System.currentTimeMillis()) != hourOf(p.getLong("live_at", 0)); }
     static final String AMBIENT_FEED = "https://clients3.google.com/cast/chromecast/home";
     static final String ART_FEED = "https://www.gstatic.com/culturalinstitute/tabext/imax_2_2.json";
-    static final int SEEN_MAX = 2000; // about 20 days of pictures at one every 15 minutes
+    static final int SEEN_MAX = 2000; // nearly 3 months of pictures at one an hour
 
     final File dir;
     final SharedPreferences p;
@@ -46,7 +52,7 @@ final class LiveWall {
     }
 
     /**
-     * Call often (it is cheap). Off the UI thread it promotes the prepared picture when 15 minutes are up
+     * Call often (it is cheap). Off the UI thread it promotes the prepared picture when a new hour starts
      * (or right away when force is set), then prepares the next one. onChange runs after a new picture is current.
      */
     void tick(boolean artOnly, boolean force, Runnable onChange) {
@@ -55,7 +61,7 @@ final class LiveWall {
         Pic next = Pic.from(p.getString("live_next", null));
         boolean nextReady = next != null && file(next.file).exists();
         boolean wrongKind = cur != null && p.getBoolean("live_cur_art", false) != artOnly; // e.g. a painting after choosing photos only
-        boolean due = cur == null || force || wrongKind || System.currentTimeMillis() - p.getLong("live_at", 0) >= ROTATE_MS;
+        boolean due = cur == null || force || wrongKind || hourTurned();
         boolean nextFits = artOnly == p.getBoolean("live_next_art", false);
         if (nextReady && nextFits && !due) return; // the next picture is waiting and it isn't time yet
         busy = true;
@@ -68,7 +74,7 @@ final class LiveWall {
                     file(n.file).delete(); ready = false; n = null;
                 }
                 if (!ready) { n = prepare(artOnly); }
-                if (n != null && (current() == null || force || wrongKind || System.currentTimeMillis() - p.getLong("live_at", 0) >= ROTATE_MS)) {
+                if (n != null && (current() == null || force || wrongKind || hourTurned())) {
                     Pic old = current();
                     p.edit().putString("live_cur", n.json()).putBoolean("live_cur_art", p.getBoolean("live_next_art", false))
                             .putLong("live_at", System.currentTimeMillis()).remove("live_next").apply();
