@@ -1559,8 +1559,8 @@ public class HomeActivity extends Activity {
         LiveWall.Pic liveNow = liveWall.current();
         final String liveId = liveNow == null ? null : "live:" + liveNow.file;
         final String liveCredit = (liveNow == null ? "Fetching the first picture from Google…" : "Now: " + liveNow.credit)
-                + "\nA new picture every 15 minutes, live from Google - never the same one twice.";
-        TextView googleRow = sheetRow(("google".equals(pref) ? "✓  " : "     ") + "Google ambient & art (live)", g, () -> pick("google"));
+                + "\nThe same photos as the Google TV screensaver. A new one every 15 minutes, live from Google - no repeats for weeks.";
+        TextView googleRow = sheetRow(("google".equals(pref) ? "✓  " : "     ") + "Google ambient photos (live)", g, () -> pick("google"));
         googleRow.setOnFocusChangeListener(chain(googleRow.getOnFocusChangeListener(), f -> {
             if (f) { if (liveId != null) showWall(liveId, false); sub.setText(liveCredit); }
         }));

@@ -15,7 +15,7 @@ final class LiveWall {
     static final long ROTATE_MS = 15 * 60_000L;
     static final String AMBIENT_FEED = "https://clients3.google.com/cast/chromecast/home";
     static final String ART_FEED = "https://www.gstatic.com/culturalinstitute/tabext/imax_2_2.json";
-    static final int SEEN_MAX = 4000;
+    static final int SEEN_MAX = 2000; // about 20 days of pictures at one every 15 minutes
 
     final File dir;
     final SharedPreferences p;
@@ -54,22 +54,24 @@ final class LiveWall {
         Pic cur = current();
         Pic next = Pic.from(p.getString("live_next", null));
         boolean nextReady = next != null && file(next.file).exists();
-        boolean due = cur == null || force || System.currentTimeMillis() - p.getLong("live_at", 0) >= ROTATE_MS;
-        boolean nextFits = !artOnly || p.getBoolean("live_next_art", false);
+        boolean wrongKind = cur != null && p.getBoolean("live_cur_art", false) != artOnly; // e.g. a painting after choosing photos only
+        boolean due = cur == null || force || wrongKind || System.currentTimeMillis() - p.getLong("live_at", 0) >= ROTATE_MS;
+        boolean nextFits = artOnly == p.getBoolean("live_next_art", false);
         if (nextReady && nextFits && !due) return; // the next picture is waiting and it isn't time yet
         busy = true;
         new Thread(() -> {
             try {
                 Pic n = Pic.from(p.getString("live_next", null));
                 boolean ready = n != null && file(n.file).exists();
-                if (ready && artOnly && !p.getBoolean("live_next_art", false)) {
-                    // Switched to art only: a prepared photo doesn't fit; prepare art instead.
+                if (ready && artOnly != p.getBoolean("live_next_art", false)) {
+                    // Switched style: the prepared picture is the wrong kind; prepare the right one.
                     file(n.file).delete(); ready = false; n = null;
                 }
                 if (!ready) { n = prepare(artOnly); }
-                if (n != null && (current() == null || force || System.currentTimeMillis() - p.getLong("live_at", 0) >= ROTATE_MS)) {
+                if (n != null && (current() == null || force || wrongKind || System.currentTimeMillis() - p.getLong("live_at", 0) >= ROTATE_MS)) {
                     Pic old = current();
-                    p.edit().putString("live_cur", n.json()).putLong("live_at", System.currentTimeMillis()).remove("live_next").apply();
+                    p.edit().putString("live_cur", n.json()).putBoolean("live_cur_art", p.getBoolean("live_next_art", false))
+                            .putLong("live_at", System.currentTimeMillis()).remove("live_next").apply();
                     if (old != null && !old.file.equals(n.file)) file(old.file).delete();
                     cleanup();
                     if (onChange != null) onChange.run();
@@ -84,7 +86,7 @@ final class LiveWall {
     Pic prepare(boolean artOnly) {
         int turn = p.getInt("live_turn", 0);
         for (int attempt = 0; attempt < 8; attempt++) {
-            boolean art = artOnly || (turn + attempt) % 2 == 1;
+            boolean art = artOnly;
             String[] cand = art ? nextArt() : nextAmbient();
             if (cand == null) { if (!artOnly) continue; return null; }
             String url = cand[0], credit = cand[1], key = key(url);
@@ -114,17 +116,23 @@ final class LiveWall {
     String[] nextAmbient() {
         try {
             org.json.JSONArray q = new org.json.JSONArray(p.getString("live_q", "[]"));
-            if (q.length() == 0) {
+            for (int tries = 0; q.length() == 0 && tries < 4; tries++) {
                 String html = Weather.get(AMBIENT_FEED, "Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 (KHTML, like Gecko) CrKey/1.56.500000");
                 int a = html.indexOf("JSON.parse('"), e = html.indexOf("'))", a);
                 org.json.JSONArray items = new org.json.JSONArray(HomeActivity.unescapeJs(html.substring(a + 12, e))).getJSONArray(0);
                 for (int i = 0; i < items.length(); i++) {
                     org.json.JSONArray it = items.getJSONArray(i);
                     String url = it.optString(0), by = it.optString(1);
-                    if (!url.contains("googleusercontent.com") || seen(key(url))) continue;
+                    if (!url.contains("googleusercontent.com")) continue;
+                    if (seen(key(url))) { oldest(url, by); continue; }
                     q.put(new org.json.JSONArray().put(url).put(by == null || by.equals("null") || by.isEmpty() ? "Google ambient" : "Photo by " + by));
                 }
             }
+            if (q.length() == 0 && fallbackUrl != null) {
+                // Everything Google offered right now was shown in the last ~20 days: reuse the one shown longest ago.
+                q.put(new org.json.JSONArray().put(fallbackUrl).put(fallbackCredit));
+            }
+            fallbackUrl = null; fallbackRank = Integer.MAX_VALUE;
             if (q.length() == 0) return null;
             org.json.JSONArray it = q.getJSONArray(0);
             org.json.JSONArray rest = new org.json.JSONArray();
@@ -132,6 +140,19 @@ final class LiveWall {
             p.edit().putString("live_q", rest.toString()).apply();
             return new String[]{it.getString(0), it.getString(1)};
         } catch (Exception e) { return null; }
+    }
+
+    String fallbackUrl, fallbackCredit;
+    int fallbackRank = Integer.MAX_VALUE;
+
+    /** Remembers the already-shown picture that was shown longest ago, as a last resort. */
+    void oldest(String url, String by) {
+        int i = 0, rank = -1; String h = Integer.toHexString(key(url).hashCode());
+        for (String x : seenSet()) { if (x.equals(h)) { rank = i; break; } i++; }
+        if (rank >= 0 && rank < fallbackRank) {
+            fallbackRank = rank; fallbackUrl = url;
+            fallbackCredit = by == null || by.equals("null") || by.isEmpty() ? "Google ambient" : "Photo by " + by;
+        }
     }
 
     /** A masterpiece from Google Arts & Culture that hasn't been shown yet. */
@@ -175,7 +196,9 @@ final class LiveWall {
 
     void markSeen(String k) {
         java.util.LinkedHashSet<String> s = seenSet();
-        s.add(Integer.toHexString(k.hashCode()));
+        String h = Integer.toHexString(k.hashCode());
+        s.remove(h); // a reused picture counts as just shown
+        s.add(h);
         org.json.JSONArray a = new org.json.JSONArray();
         int skip = Math.max(0, s.size() - SEEN_MAX), i = 0;
         for (String x : s) if (i++ >= skip) a.put(x);

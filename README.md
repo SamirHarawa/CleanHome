@@ -13,7 +13,7 @@ Assistant voice button, Chromecast, AirPlay, the Play Store, your accounts and a
 
 - **Big clock, date and live weather** for your area, with colour weather icons.
 - **A dock of up to 6 favourite apps** with consistent brand-coloured logos, for every app, including ones you install later.
-- **Live wallpapers from Google**: a new picture every 15 minutes, straight from the internet and never the same one twice - Google's Chromecast ambient photos and Google Arts & Culture masterpieces (or art only). Bing's photo of the day and a built-in set are there too.
+- **Live wallpapers from Google**: a new picture every 15 minutes, straight from the internet and no repeats for weeks - the same kind of photos as the Google TV screensaver (or Google Arts & Culture masterpieces). Bing's photo of the day and a built-in set are there too.
 - **Smooth, gentle animations** and the familiar navigation sounds.
 - **All apps** in a neat, evenly spaced grid. Hold OK on any app to add it to (or remove it from) the dock.
 - **Search** for apps, or search Google TV and YouTube, by typing or by voice.
