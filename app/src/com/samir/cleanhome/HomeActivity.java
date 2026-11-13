@@ -1255,6 +1255,10 @@ public class HomeActivity extends Activity {
 
     void closeOverlay() {
         dismissing = false;
+        if (morphAnim != null) morphAnim.cancel();
+        morphAnim = null;
+        morphSheet = null;
+        morphGrid = null;
         overlay.animate().cancel();
         for (View v : new View[]{dock, clock, date, wx, utils}) { if (v == null) continue; v.animate().cancel(); v.setAlpha(1f); v.setScaleX(1f); v.setScaleY(1f); }
         overlay.removeAllViews();
@@ -1272,6 +1276,15 @@ public class HomeActivity extends Activity {
     void dismissOverlay(boolean revertPreview) {
         if (overlay.getVisibility() != View.VISIBLE || dismissing) return;
         dismissing = true;
+        if (morphSheet != null) {
+            blockHome(false);
+            morphClose();
+            for (View v : new View[]{clock, date, wx, utils}) v.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(0)
+                    .setDuration(420).setInterpolator(Motion.OUT).withLayer().start();
+            if (revertPreview) applyWallpaper(false);
+            focusDock(lastDockFocus);
+            return;
+        }
         blockHome(false);
         View content = overlay.getChildCount() > 0 ? overlay.getChildAt(0) : null;
         int kind = overlay.getTag() instanceof Integer ? (Integer) overlay.getTag() : SHEET_FULL;
@@ -1282,7 +1295,7 @@ public class HomeActivity extends Activity {
         float sc = card != null || kind == SHEET_PANEL ? 1f : kind == SHEET_MENU ? .94f : .97f;
         overlay.setPivotX(overlay.getWidth() / 2f);
         overlay.setPivotY(overlay.getHeight() / 2f);
-        overlay.animate().alpha(0f).scaleX(sc).scaleY(sc).setDuration(kind == SHEET_MENU ? 200 : 240).setInterpolator(Motion.IN)
+        overlay.animate().alpha(0f).scaleX(sc).scaleY(sc).setStartDelay(0).setDuration(kind == SHEET_MENU ? 200 : 240).setInterpolator(Motion.IN)
                 .withLayer().withEndAction(this::closeOverlay).start();
         // Home comes back forward as the sheet leaves.
         // Static views fade back as cached layers; the dock is drawn live because its focused card animates.
@@ -1301,7 +1314,7 @@ public class HomeActivity extends Activity {
         overlay.addView(content, lp);
         overlay.setVisibility(View.VISIBLE);
         overlay.setAlpha(0f);
-        overlay.animate().alpha(1f).setDuration(280).setInterpolator(Motion.OUT).start();
+        overlay.animate().alpha(1f).setStartDelay(0).setDuration(280).setInterpolator(Motion.OUT).start();
         // Home steps back a little behind full sheets and menus, giving them depth.
         if (kind != SHEET_PANEL) {
             float a = kind == SHEET_FULL ? 0f : .55f, sc = kind == SHEET_FULL ? .96f : .985f;
@@ -1590,6 +1603,93 @@ public class HomeActivity extends Activity {
         return c instanceof FrameLayout ? (FrameLayout) c : t;
     }
 
+    // ---------------------------------------------------------------- Apps grows out of the dock
+
+    static final int MORPH_IN = 560, MORPH_OUT = 440;
+    /** The sheet that grew out of the dock (null when the open sheet is not Apps), and its grid. */
+    FrameLayout morphSheet;
+    View morphGrid;
+    ValueAnimator morphAnim;
+
+    /** A rounded-rect clip whose rectangle and radius the morph moves each frame. */
+    static final class MorphOutline extends ViewOutlineProvider {
+        final RectF r = new RectF();
+        float radius;
+        @Override public void getOutline(View v, Outline o) {
+            o.setRoundRect(Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom), radius);
+        }
+    }
+
+    /** p = 0: the sheet is clipped to exactly the dock's glass; p = 1: the whole screen. */
+    void morph(float p) {
+        if (morphSheet == null) return;
+        MorphOutline mo = (MorphOutline) morphSheet.getOutlineProvider();
+        float l = px(DOCK_X), t = px(DOCK_Y), r = px(DOCK_X + DOCK_W), b = px(DOCK_Y + DOCK_H);
+        mo.r.set(l * (1 - p), t * (1 - p), r + (SW - r) * p, b + (SH - b) * p);
+        mo.radius = px(DOCK_R) * (1 - p);
+        morphSheet.invalidateOutline();
+    }
+
+    /** The dock's glass stretches up into the full Apps sheet; the dock itself hides under it at once. */
+    void morphOpen(FrameLayout sh, View grid) {
+        morphSheet = sh;
+        morphGrid = grid;
+        sh.setOutlineProvider(new MorphOutline());
+        sh.setClipToOutline(true);
+        // The morph replaces showOverlay's fade and zoom.
+        overlay.animate().cancel();
+        overlay.setAlpha(1f);
+        sh.animate().cancel();
+        sh.setScaleX(1f);
+        sh.setScaleY(1f);
+        dock.animate().cancel();
+        dock.setAlpha(0f);
+        dock.setScaleX(1f);
+        dock.setScaleY(1f);
+        morph(0f);
+        morphAnim = ValueAnimator.ofFloat(0f, 1f);
+        morphAnim.setDuration(MORPH_IN);
+        morphAnim.setInterpolator(GlideScroll.GLIDE);
+        morphAnim.addUpdateListener(a -> morph((Float) a.getAnimatedValue()));
+        morphAnim.addListener(new MorphEnd(this));
+        morphAnim.start();
+    }
+
+    /** Once fully open, the clip is dropped so the sheet draws without it. */
+    static final class MorphEnd extends android.animation.AnimatorListenerAdapter {
+        final HomeActivity a;
+        boolean cancelled;
+        MorphEnd(HomeActivity a) { this.a = a; }
+        @Override public void onAnimationCancel(android.animation.Animator an) { cancelled = true; }
+        @Override public void onAnimationEnd(android.animation.Animator an) {
+            if (!cancelled && a.morphSheet != null) a.morphSheet.setClipToOutline(false);
+        }
+    }
+
+    /** Back: the cards fade, the sheet shrinks into the dock's glass, and hands over to the dock. */
+    void morphClose() {
+        // If Back comes mid-open, shrink from wherever the sheet has got to.
+        float from = morphAnim != null && morphAnim.isRunning() ? (Float) morphAnim.getAnimatedValue() : 1f;
+        if (morphAnim != null) morphAnim.cancel();
+        morphSheet.setClipToOutline(true);
+        morphGrid.animate().alpha(0f).setStartDelay(0).setDuration(150).setInterpolator(Motion.IN).withLayer().start();
+        // The dock stays hidden (and so is not drawn) under the shrinking sheet; it fades in at the hand-over.
+        dock.animate().cancel();
+        dock.setAlpha(0f);
+        dock.setScaleX(1f);
+        dock.setScaleY(1f);
+        dock.animate().alpha(1f).setStartDelay(60 + MORPH_OUT - 150).setDuration(150).setInterpolator(Motion.INOUT).start();
+        morphAnim = ValueAnimator.ofFloat(from, 0f);
+        morphAnim.setStartDelay(60);
+        morphAnim.setDuration(MORPH_OUT);
+        morphAnim.setInterpolator(Motion.INOUT);
+        morphAnim.addUpdateListener(a -> morph((Float) a.getAnimatedValue()));
+        morphAnim.start();
+        // Over the last stretch the sheet fades, revealing the dock exactly where it was.
+        overlay.animate().alpha(0f).setStartDelay(60 + MORPH_OUT - 150).setDuration(150).setInterpolator(Motion.INOUT)
+                .withEndAction(this::closeOverlay).start();
+    }
+
     /** Apps: every installed app. OK opens; hold OK or Menu adds it to Home or removes it. */
     void showApps() {
         FrameLayout sh = sheet(.46f, SW, false);
@@ -1655,9 +1755,12 @@ public class HomeActivity extends Activity {
             appTiles.put(pkg, t);
             if (first == null) first = t;
             int idx = i - 1;
-            if (idx < 25) Motion.rise(t, px(28), 120 + (idx / 5) * 55L + (idx % 5) * 22L, 520);
+            if (idx < 25) Motion.rise(t, px(28), MORPH_IN / 2 + (idx / 5) * 55L + (idx % 5) * 22L, 520);
         }
+        Motion.rise(title, px(20), MORPH_IN / 2 - 60, 480);
+        Motion.rise(appsHint, px(20), MORPH_IN / 2 - 20, 480);
         showOverlay(sh, new FrameLayout.LayoutParams(MATCH, MATCH), SHEET_FULL, first);
+        morphOpen(sh, sv);
     }
 
     void updateAppsHint() {
