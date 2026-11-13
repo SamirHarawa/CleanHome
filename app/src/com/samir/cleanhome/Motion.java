@@ -57,6 +57,7 @@ final class Motion {
         v.animate().cancel();
         v.setAlpha(0f);
         v.setTranslationY(dy);
-        v.animate().alpha(1f).translationY(0).setStartDelay(delay).setDuration(dur).setInterpolator(OUT).start();
+        // A cached layer while it fades: the view is drawn once, not re-blended every frame.
+        v.animate().alpha(1f).translationY(0).setStartDelay(delay).setDuration(dur).setInterpolator(OUT).withLayer().start();
     }
 }

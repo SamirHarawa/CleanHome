@@ -9,7 +9,7 @@ a third-party home screen to take over, so the installer and the app use a few s
 |---|---|
 | `HomeActivity` | The home screen itself: clock, weather, dock, sheets, wallpapers, search. |
 | `HomeKeyService` | An **accessibility service** (the "Home button helper"). Google TV's own launcher always claims the Home button; whenever Google TV's home appears, this switches straight to CleanHome. It also lets the remote's Settings and YouTube buttons work everywhere, and starts the screensaver. |
-| `Frost`, `Glide`, `Motion` | Rendering: the frosted glass dock, the gliding focus highlight, and the motion curves. |
+| `Frost`, `Glide`, `Motion`, `GlideScroll` | Rendering: the frosted glass dock, the gliding focus highlight, the motion curves, and the Apps grid's tvOS-style scrolling (the focused row stays put while the grid glides under it). |
 | `AutoMark` | Turns any app's icon or banner into a clean logo in its brand colour. |
 | `BannerArt` | Apps grid cards: checks whether an app's banner is a real one, and builds a 16:9 banner (icon above the app's name) when it isn't. |
 | `Weather` | Location and forecast, with the colour weather icons. |

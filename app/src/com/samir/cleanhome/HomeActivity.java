@@ -35,6 +35,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewPropertyAnimator;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.animation.PathInterpolator;
@@ -340,6 +341,7 @@ public class HomeActivity extends Activity {
         hideBars();
         loadApps();
         buildDock();
+        prewarmCards();
         fetchDaily(false);
         liveTick(false);
         refreshAvatar();
@@ -1023,15 +1025,17 @@ public class HomeActivity extends Activity {
         label.animate().alpha(f ? 1f : .84f).setDuration(f ? 220 : 180).setInterpolator(Motion.OUT).start();
     }
 
-    final Map<String, Integer> brandColors = new HashMap<>();
+    final Map<String, Integer> brandColors = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** The colour an app's mark is drawn in: its brand colour (known, or read from its own art). */
-    int brandColor(String pkg) {
+    int brandColor(String pkg) { return brandColorOf(pkg, apps.get(pkg)); }
+
+    /** As brandColor, but from a given ResolveInfo, so it can run off the main thread. */
+    int brandColorOf(String pkg, ResolveInfo ri) {
         int known = knownBrand(pkg);
         if (known != 0) return known;
         Integer c = brandColors.get(pkg);
         if (c != null) return c;
-        ResolveInfo ri = apps.get(pkg);
         int col = Color.WHITE;
         if (ri != null) {
             PackageManager pm = getPackageManager();
@@ -1250,30 +1254,43 @@ public class HomeActivity extends Activity {
     static final int SHEET_FULL = 0, SHEET_PANEL = 1, SHEET_MENU = 2;
 
     void closeOverlay() {
+        dismissing = false;
         overlay.animate().cancel();
         for (View v : new View[]{dock, clock, date, wx, utils}) { if (v == null) continue; v.animate().cancel(); v.setAlpha(1f); v.setScaleX(1f); v.setScaleY(1f); }
         overlay.removeAllViews();
         overlay.setVisibility(View.GONE);
         overlay.setAlpha(1f);
+        overlay.setScaleX(1f);
+        overlay.setScaleY(1f);
         blockHome(false);
     }
 
     /** Fades the open sheet away, then returns to the dock. */
+    /** True while a sheet fades out: its cards skip their unfocus animation so its cached layer stays valid. */
+    boolean dismissing;
+
     void dismissOverlay(boolean revertPreview) {
-        if (overlay.getVisibility() != View.VISIBLE) return;
+        if (overlay.getVisibility() != View.VISIBLE || dismissing) return;
+        dismissing = true;
         blockHome(false);
         View content = overlay.getChildCount() > 0 ? overlay.getChildAt(0) : null;
         int kind = overlay.getTag() instanceof Integer ? (Integer) overlay.getTag() : SHEET_FULL;
         View card = content == null ? null : content.findViewWithTag("card");
         if (card != null) card.animate().translationX(px(72)).setDuration(220).setInterpolator(Motion.IN).start();
-        else if (content != null) {
-            if (kind == SHEET_PANEL) content.animate().translationX(px(64)).setDuration(220).setInterpolator(Motion.IN).start();
-            else if (kind == SHEET_MENU) content.animate().scaleX(.94f).scaleY(.94f).setDuration(200).setInterpolator(Motion.IN).start();
-            else content.animate().scaleX(.97f).scaleY(.97f).setDuration(220).setInterpolator(Motion.IN).start();
-        }
-        overlay.animate().alpha(0f).setDuration(220).setInterpolator(Motion.IN).withEndAction(this::closeOverlay).start();
+        else if (content != null && kind == SHEET_PANEL) content.animate().translationX(px(64)).setDuration(220).setInterpolator(Motion.IN).start();
+        // Full sheets and menus fade and shrink as one cached layer: drawn once, then only composited.
+        float sc = card != null || kind == SHEET_PANEL ? 1f : kind == SHEET_MENU ? .94f : .97f;
+        overlay.setPivotX(overlay.getWidth() / 2f);
+        overlay.setPivotY(overlay.getHeight() / 2f);
+        overlay.animate().alpha(0f).scaleX(sc).scaleY(sc).setDuration(kind == SHEET_MENU ? 200 : 240).setInterpolator(Motion.IN)
+                .withLayer().withEndAction(this::closeOverlay).start();
         // Home comes back forward as the sheet leaves.
-        for (View v : new View[]{dock, clock, date, wx, utils}) v.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(420).setInterpolator(Motion.OUT).start();
+        // Static views fade back as cached layers; the dock is drawn live because its focused card animates.
+        for (View v : new View[]{dock, clock, date, wx, utils}) {
+            ViewPropertyAnimator an = v.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(420).setInterpolator(Motion.OUT);
+            if (v != dock) an.withLayer();
+            an.start();
+        }
         if (revertPreview) applyWallpaper(false);
         focusDock(lastDockFocus);
     }
@@ -1288,7 +1305,11 @@ public class HomeActivity extends Activity {
         // Home steps back a little behind full sheets and menus, giving them depth.
         if (kind != SHEET_PANEL) {
             float a = kind == SHEET_FULL ? 0f : .55f, sc = kind == SHEET_FULL ? .96f : .985f;
-            for (View v : new View[]{dock, clock, date, wx, utils}) v.animate().alpha(a).scaleX(sc).scaleY(sc).setStartDelay(0).setDuration(360).setInterpolator(Motion.OUT).start();
+            for (View v : new View[]{dock, clock, date, wx, utils}) {
+                ViewPropertyAnimator an = v.animate().alpha(a).scaleX(sc).scaleY(sc).setStartDelay(0).setDuration(360).setInterpolator(Motion.OUT);
+                if (v != dock) an.withLayer();
+                an.start();
+            }
         }
         View card = content.findViewWithTag("card");
         if (card != null) {
@@ -1421,10 +1442,19 @@ public class HomeActivity extends Activity {
     static final int DOCK_CARD_W = 240, DOCK_CARD_H = 135,
             DOCK_CARD_GAP = (DOCK_W - 80 - MAX_DOCK * DOCK_CARD_W) / (MAX_DOCK - 1);
 
-    final Map<String, Drawable> cardArts = new HashMap<>();
+    final Map<String, Drawable> cardArts = new java.util.concurrent.ConcurrentHashMap<>();
     /** The app's banner if it is a real one, else a card built from its icon; cached per app version. */
-    Drawable cardArt(String pkg) {
-        ResolveInfo ri = apps.get(pkg);
+    Drawable cardArt(String pkg) { return cardArtOf(pkg, apps.get(pkg)); }
+
+    /** Builds every app's card art in the background, so opening Apps never waits on it. */
+    void prewarmCards() {
+        final List<Map.Entry<String, ResolveInfo>> snap = new ArrayList<>(apps.entrySet());
+        worker.execute(() -> {
+            for (Map.Entry<String, ResolveInfo> e : snap) cardArtOf(e.getKey(), e.getValue());
+        });
+    }
+
+    Drawable cardArtOf(String pkg, ResolveInfo ri) {
         if (ri == null) return null;
         PackageManager pm = getPackageManager();
         String key = pkg;
@@ -1435,7 +1465,7 @@ public class HomeActivity extends Activity {
             Drawable b = ri.activityInfo.loadBanner(pm);
             if (BannerArt.usable(b)) d = b;
             else d = new android.graphics.drawable.BitmapDrawable(getResources(),
-                    BannerArt.fromIcon(ri.loadIcon(pm), brandColor(pkg), appLabel(pkg), Typeface.create(Typeface.SANS_SERIF, 500, false), px(CARD_W), px(CARD_H)));
+                    BannerArt.fromIcon(ri.loadIcon(pm), brandColorOf(pkg, ri), appLabelOf(pkg, ri), Typeface.create(Typeface.SANS_SERIF, 500, false), px(CARD_W), px(CARD_H)));
             android.util.Log.i("CleanHomeCard", pkg + (d == b ? " banner" : " built from icon"));
         } catch (Exception e) { return null; }
         cardArts.put(key, d);
@@ -1514,6 +1544,8 @@ public class HomeActivity extends Activity {
     }
 
     void cardFocus(View t, boolean f) {
+        // A closing sheet is a cached layer; animating a card inside it would redraw the whole sheet every frame.
+        if (!f && dismissing && t.getParent() != null && isInOverlay(t)) return;
         View card = t.findViewWithTag("appcard"), label = t.findViewWithTag("label");
         View sheen = t.findViewWithTag("sheen"), glow = t.findViewWithTag("glow"), mark = t.findViewWithTag("mark");
         boolean banner = glow == null;
@@ -1530,6 +1562,11 @@ public class HomeActivity extends Activity {
         sheen.animate().alpha(f ? 1f : 0f).setDuration(f ? 300 : 180).start();
         if (glow != null) glow.animate().alpha(f ? 1f : 0f).setDuration(f ? 260 : 180).start();
         if (mark != null) mark.animate().alpha(f ? 1f : .9f).setDuration(220).start();
+    }
+
+    boolean isInOverlay(View v) {
+        for (android.view.ViewParent p = v.getParent(); p != null; p = p.getParent()) if (p == overlay) return true;
+        return false;
     }
 
     /** Marks an app that is on Home: a small dot inside the card's corner, ringed so it shows on bright banners. */
@@ -1564,7 +1601,9 @@ public class HomeActivity extends Activity {
 
         // Wider than the grid so lifted cards and their shadows are never clipped at the edges.
         final int pad = 48;
-        ScrollView sv = new ScrollView(this);
+        GlideScroll sv = new GlideScroll(this);
+        // The focused row settles here (stage px from the top), like tvOS; the first row never scrolls.
+        sv.anchor = px(300);
         sv.setVerticalScrollBarEnabled(false);
         sv.setVerticalFadingEdgeEnabled(false);
         sv.setSmoothScrollingEnabled(true);
@@ -1602,7 +1641,7 @@ public class HomeActivity extends Activity {
             }
             FrameLayout t = appCard(pkg);
             if (d.contains(pkg)) pinHost(t).addView(homeDot());
-            t.setOnFocusChangeListener((v, f) -> cardFocus(v, f));
+            t.setOnFocusChangeListener((v, f) -> { cardFocus(v, f); if (f) sv.follow(v); });
             t.setOnClickListener(v -> { launch(pkg, v.findViewWithTag("appcard")); closeOverlay(); });
             t.setOnLongClickListener(v -> { clickSound(); togglePin(pkg); return true; });
             t.setOnKeyListener((v, k, e) -> {
@@ -2335,8 +2374,9 @@ public class HomeActivity extends Activity {
 
     void saveDock(List<String> d) { prefs.edit().putString("dock", TextUtils.join(",", d)).apply(); }
 
-    String appLabel(String pkg) {
-        ResolveInfo ri = apps.get(pkg);
+    String appLabel(String pkg) { return appLabelOf(pkg, apps.get(pkg)); }
+
+    String appLabelOf(String pkg, ResolveInfo ri) {
         if (ri == null) return pkg;
         if (pkg.equals("com.tcl.tv")) return "Live TV";
         if (pkg.equals("com.android.vending")) return "Play Store";
