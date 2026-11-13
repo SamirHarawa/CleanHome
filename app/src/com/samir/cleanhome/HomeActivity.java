@@ -329,7 +329,9 @@ public class HomeActivity extends Activity {
         final HomeActivity a;
         PackageReceiver(HomeActivity a) { this.a = a; }
         @Override public void onReceive(android.content.Context c, Intent i) {
+            a.artKeys.clear();
             a.loadApps();
+            a.prewarmCards();
             a.buildDock();
             if (a.overlay.getVisibility() != View.VISIBLE) a.focusDock(a.lastDockFocus);
         }
@@ -1451,6 +1453,8 @@ public class HomeActivity extends Activity {
 
     /** All Apps card (stage px): 16:9 like Android TV banners; the name shows only under the focused card. */
     static final int CARD_W = 264, CARD_H = 148, CARD_R = 22, CELL_H = 232;
+    /** Card art is rendered this much larger than the card, so a focused (lifted) card stays sharp. */
+    static final float ART_SCALE = 1.25f;
     /** Dock cards: 16:9 banners with an even ~40 px margin around and between them. */
     static final int DOCK_CARD_W = 240, DOCK_CARD_H = 135,
             DOCK_CARD_GAP = (DOCK_W - 80 - MAX_DOCK * DOCK_CARD_W) / (MAX_DOCK - 1);
@@ -1463,23 +1467,40 @@ public class HomeActivity extends Activity {
     void prewarmCards() {
         final List<Map.Entry<String, ResolveInfo>> snap = new ArrayList<>(apps.entrySet());
         worker.execute(() -> {
+            // Re-read each app's version here, off the main thread, so updated apps get fresh art.
+            artKeys.clear();
             for (Map.Entry<String, ResolveInfo> e : snap) cardArtOf(e.getKey(), e.getValue());
+            h.post(this::warmApps);
         });
     }
+
+    /** pkg -> cache key (package@lastUpdateTime), so a lookup makes no call into the system. Cleared when apps change. */
+    final Map<String, String> artKeys = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Labels read once per app list load, so building cards makes no call into the system. */
+    final Map<String, String> labels = new java.util.concurrent.ConcurrentHashMap<>();
 
     Drawable cardArtOf(String pkg, ResolveInfo ri) {
         if (ri == null) return null;
         PackageManager pm = getPackageManager();
-        String key = pkg;
-        try { key += "@" + pm.getPackageInfo(pkg, 0).lastUpdateTime; } catch (Exception ignored) { }
+        String key = artKeys.get(pkg);
+        if (key == null) {
+            key = pkg;
+            try { key += "@" + pm.getPackageInfo(pkg, 0).lastUpdateTime; } catch (Exception ignored) { }
+            artKeys.put(pkg, key);
+        }
         Drawable d = cardArts.get(key);
         if (d != null) return d;
+        // Every card is a ready-made bitmap a little larger than the card (so it stays sharp when it lifts),
+        // uploaded to the GPU ahead of time: cheap to draw, and no hitch the first time Apps opens.
+        int w = Math.round(px(CARD_W) * ART_SCALE), hh = Math.round(px(CARD_H) * ART_SCALE);
         try {
             Drawable b = ri.activityInfo.loadBanner(pm);
-            if (BannerArt.usable(b)) d = b;
-            else d = new android.graphics.drawable.BitmapDrawable(getResources(),
-                    BannerArt.fromIcon(ri.loadIcon(pm), brandColorOf(pkg, ri), appLabelOf(pkg, ri), Typeface.create(Typeface.SANS_SERIF, 500, false), px(CARD_W), px(CARD_H)));
-            android.util.Log.i("CleanHomeCard", pkg + (d == b ? " banner" : " built from icon"));
+            boolean real = BannerArt.usable(b);
+            Bitmap art = real ? BannerArt.cover(b, w, hh)
+                    : BannerArt.fromIcon(ri.loadIcon(pm), brandColorOf(pkg, ri), appLabelOf(pkg, ri), Typeface.create(Typeface.SANS_SERIF, 500, false), w, hh);
+            art.prepareToDraw();
+            d = new android.graphics.drawable.BitmapDrawable(getResources(), art);
+            android.util.Log.i("CleanHomeCard", pkg + (real ? " banner" : " built from icon"));
         } catch (Exception e) { return null; }
         cardArts.put(key, d);
         return d;
@@ -1691,7 +1712,26 @@ public class HomeActivity extends Activity {
     }
 
     /** Apps: every installed app. OK opens; hold OK or Menu adds it to Home or removes it. */
-    void showApps() {
+    void showApps() { showApps(false); }
+
+    boolean appsWarmed;
+
+    /**
+     * Once per start, while Home is idle, builds the Apps sheet without showing it, so the first real open
+     * runs code that is already warm instead of paying a ~100 ms hitch.
+     */
+    void warmApps() {
+        if (appsWarmed) return;
+        h.postDelayed(() -> {
+            if (appsWarmed || overlay.getVisibility() == View.VISIBLE || isFinishing()) return;
+            appsWarmed = true;
+            showApps(true);
+            appTiles.clear();
+            appsHint = null;
+        }, 2500);
+    }
+
+    void showApps(boolean warmOnly) {
         FrameLayout sh = sheet(.46f, SW, false);
         // The title and hint scroll away with the grid, like a tvOS large title.
         TextView title = text(60, INK, f600, -1.8f);
@@ -1759,6 +1799,15 @@ public class HomeActivity extends Activity {
         }
         Motion.rise(title, px(20), MORPH_IN / 2 - 60, 480);
         Motion.rise(appsHint, px(20), MORPH_IN / 2 - 20, 480);
+        if (warmOnly) {
+            // Measure and draw it once off screen, so layout and drawing code are warm too; then drop it.
+            sh.measure(View.MeasureSpec.makeMeasureSpec(SW, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(SH, View.MeasureSpec.EXACTLY));
+            sh.layout(0, 0, SW, SH);
+            android.graphics.Picture pic = new android.graphics.Picture();
+            sh.draw(pic.beginRecording(SW, SH));
+            pic.endRecording();
+            return;
+        }
         showOverlay(sh, new FrameLayout.LayoutParams(MATCH, MATCH), SHEET_FULL, first);
         morphOpen(sh, sv);
     }
@@ -2445,9 +2494,13 @@ public class HomeActivity extends Activity {
             if (!p.equals(getPackageName()) && !seen.containsKey(p)) seen.put(p, ri);
         }
         List<ResolveInfo> sorted = new ArrayList<>(seen.values());
-        Map<ResolveInfo, String> labels = new HashMap<>();
-        for (ResolveInfo ri : sorted) labels.put(ri, String.valueOf(ri.loadLabel(pm)));
-        Collections.sort(sorted, (a, c) -> labels.get(a).compareToIgnoreCase(labels.get(c)));
+        Map<ResolveInfo, String> byInfo = new HashMap<>();
+        for (ResolveInfo ri : sorted) {
+            String l = String.valueOf(ri.loadLabel(pm));
+            byInfo.put(ri, l);
+            labels.put(ri.activityInfo.packageName, l);
+        }
+        Collections.sort(sorted, (a, c) -> byInfo.get(a).compareToIgnoreCase(byInfo.get(c)));
         for (ResolveInfo ri : sorted) apps.put(ri.activityInfo.packageName, ri);
     }
 
@@ -2483,7 +2536,11 @@ public class HomeActivity extends Activity {
         if (ri == null) return pkg;
         if (pkg.equals("com.tcl.tv")) return "Live TV";
         if (pkg.equals("com.android.vending")) return "Play Store";
-        return String.valueOf(ri.loadLabel(getPackageManager()));
+        String l = labels.get(pkg);
+        if (l != null) return l;
+        l = String.valueOf(ri.loadLabel(getPackageManager()));
+        labels.put(pkg, l);
+        return l;
     }
 
     // ================================================================ actions

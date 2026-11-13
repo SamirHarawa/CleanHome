@@ -143,6 +143,24 @@ final class BannerArt {
         return Color.argb((int) (a / n), (int) (r / n), (int) (g / n), (int) (bl / n));
     }
 
+    /** The drawable scaled to cover w x h and centred (like CENTER_CROP), as a bitmap. */
+    static Bitmap cover(Drawable d, int w, int h) {
+        int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        android.graphics.Rect old = d.copyBounds();
+        if (iw <= 0 || ih <= 0) d.setBounds(0, 0, w, h);
+        else {
+            float k = Math.max((float) w / iw, (float) h / ih);
+            int dw = Math.round(iw * k), dh = Math.round(ih * k);
+            d.setBounds((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh);
+        }
+        if (d instanceof android.graphics.drawable.BitmapDrawable) ((android.graphics.drawable.BitmapDrawable) d).setFilterBitmap(true);
+        d.draw(c);
+        d.setBounds(old);
+        return b;
+    }
+
     static Bitmap render(Drawable d, int w, int h) {
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
