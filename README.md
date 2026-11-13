@@ -15,7 +15,7 @@ Assistant voice button, Chromecast, AirPlay, the Play Store, your accounts and a
 - **A dock of up to 6 favourite apps** with consistent brand-coloured logos, for every app, including ones you install later.
 - **Live wallpapers from Google**: a new picture every hour on the hour, straight from the internet and no repeats for months - the same kind of photos as the Google TV screensaver (or Google Arts & Culture masterpieces). Bing's photo of the day and a built-in set are there too.
 - **Smooth, gentle animations** and the familiar navigation sounds.
-- **All apps** in a neat, evenly spaced grid. Hold OK on any app to add it to (or remove it from) the dock.
+- **All apps** as a grid of Apple TV-style banner cards that lift when selected. Hold OK on any app to add it to (or remove it from) the dock.
 - **Search** for apps, or search Google TV and YouTube, by typing or by voice.
 - **Back on the home screen starts Google's screensaver**, with a soft fade.
 - **The remote's Settings button** opens Google TV's normal quick settings. The account icon opens your profile.

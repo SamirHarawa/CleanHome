@@ -1023,19 +1023,6 @@ public class HomeActivity extends Activity {
         label.animate().alpha(f ? 1f : .84f).setDuration(f ? 220 : 180).setInterpolator(Motion.OUT).start();
     }
 
-    View pinDot() {
-        View dot = new View(this);
-        GradientDrawable dg = new GradientDrawable();
-        dg.setShape(GradientDrawable.OVAL);
-        dg.setColor(INK);
-        dot.setBackground(dg);
-        dot.setTag("pin");
-        FrameLayout.LayoutParams dlp = new FrameLayout.LayoutParams(px(12), px(12), Gravity.TOP | Gravity.END);
-        dlp.setMargins(0, px(18), px(20), 0);
-        dot.setLayoutParams(dlp);
-        return dot;
-    }
-
     final Map<String, Integer> brandColors = new HashMap<>();
 
     /** The colour an app's mark is drawn in: its brand colour (known, or read from its own art). */
@@ -1428,32 +1415,170 @@ public class HomeActivity extends Activity {
     TextView appsHint;
     final Map<String, FrameLayout> appTiles = new HashMap<>();
 
+    /** All Apps card (stage px): 16:9 like Android TV banners; the name shows only under the focused card. */
+    static final int CARD_W = 264, CARD_H = 148, CARD_R = 22, CELL_H = 232;
+
+    final Map<String, Drawable> cardArts = new HashMap<>();
+
+    /** The app's banner if it is a real one, else a card built from its icon; cached per app version. */
+    Drawable cardArt(String pkg) {
+        ResolveInfo ri = apps.get(pkg);
+        if (ri == null) return null;
+        PackageManager pm = getPackageManager();
+        String key = pkg;
+        try { key += "@" + pm.getPackageInfo(pkg, 0).lastUpdateTime; } catch (Exception ignored) { }
+        Drawable d = cardArts.get(key);
+        if (d != null) return d;
+        try {
+            Drawable b = ri.activityInfo.loadBanner(pm);
+            if (BannerArt.usable(b)) d = b;
+            else d = new android.graphics.drawable.BitmapDrawable(getResources(),
+                    BannerArt.fromIcon(ri.loadIcon(pm), brandColor(pkg), px(CARD_W), px(CARD_H)));
+            android.util.Log.i("CleanHomeCard", pkg + (d == b ? " banner" : " built from icon"));
+        } catch (Exception e) { return null; }
+        cardArts.put(key, d);
+        return d;
+    }
+
+    /**
+     * One app in the Apps grid, in the tvOS manner: a rounded card that lifts, casts a shadow and catches
+     * a sheen when focused, with its name fading in underneath. Shows the app's banner (or one built from
+     * its icon); if even that fails, its brand mark on frosted glass.
+     */
+    FrameLayout appCard(String pkg) {
+        FrameLayout t = new FrameLayout(this);
+        t.setFocusable(true);
+        t.setClickable(true);
+        t.setClipChildren(false);
+
+        FrameLayout card = new FrameLayout(this);
+        card.setTag("appcard");
+        card.setOutlineProvider(new RoundOutline(px(CARD_R)));
+        card.setClipToOutline(true);
+        card.setPivotX(px(CARD_W) / 2f);
+        card.setPivotY(px(CARD_H) / 2f);
+
+        Drawable banner = cardArt(pkg);
+        View glow = null;
+        if (banner != null) {
+            ImageView iv = new ImageView(this);
+            iv.setImageDrawable(banner);
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            card.setBackgroundColor(0xFF1C1D20);
+            card.addView(iv, new FrameLayout.LayoutParams(MATCH, MATCH));
+            card.setElevation(px(6));
+        } else {
+            card.setBackground(new PlateDrawable(.13f, .07f, .10f, .26f, px(CARD_R)));
+            // Brighter glass that fades in on focus, under the mark.
+            glow = new View(this);
+            glow.setBackground(new PlateDrawable(.34f, .20f, .26f, .50f, px(CARD_R)));
+            glow.setAlpha(0f);
+            glow.setTag("glow");
+            card.addView(glow, new FrameLayout.LayoutParams(MATCH, MATCH));
+            View mark = mark(pkg);
+            mark.setTag("mark");
+            mark.setAlpha(.9f);
+            FrameLayout.LayoutParams mlp = (FrameLayout.LayoutParams) mark.getLayoutParams();
+            mlp.gravity = Gravity.CENTER;
+            card.addView(mark, mlp);
+        }
+
+        // Sheen: a soft diagonal highlight across the top-left, shown on focus.
+        View sheen = new View(this);
+        GradientDrawable sg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0x38FFFFFF, 0x0FFFFFFF, 0x00FFFFFF});
+        sheen.setBackground(sg);
+        sheen.setAlpha(0f);
+        sheen.setTag("sheen");
+        card.addView(sheen, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        t.addView(card, new FrameLayout.LayoutParams(px(CARD_W), px(CARD_H), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+
+        TextView label = text(27, INK, f500, -.4f);
+        label.setText(appLabel(pkg));
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        label.setGravity(Gravity.CENTER);
+        label.setAlpha(0f);
+        label.setTag("label");
+        label.setShadowLayer(px(10), 0, px(2), 0x66000000);
+        FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(px(CARD_W + 40), px(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        llp.topMargin = px(CARD_H + 24);
+        t.addView(label, llp);
+        return t;
+    }
+
+    void cardFocus(View t, boolean f) {
+        View card = t.findViewWithTag("appcard"), label = t.findViewWithTag("label");
+        View sheen = t.findViewWithTag("sheen"), glow = t.findViewWithTag("glow"), mark = t.findViewWithTag("mark");
+        boolean banner = glow == null;
+        if (f) {
+            card.animate().scaleX(1.12f).scaleY(1.12f).translationY(-px(4)).translationZ(px(banner ? 22 : 0))
+                    .setDuration(460).setInterpolator(Motion.SPRING).start();
+            label.animate().alpha(1f).translationY(px(6)).setDuration(260).setInterpolator(Motion.OUT).start();
+        } else {
+            card.animate().scaleX(1f).scaleY(1f).translationY(0).translationZ(0).setDuration(280).setInterpolator(Motion.OUT).start();
+            label.animate().alpha(0f).translationY(0).setDuration(160).setInterpolator(Motion.OUT).start();
+        }
+        sheen.animate().alpha(f ? 1f : 0f).setDuration(f ? 300 : 180).start();
+        if (glow != null) glow.animate().alpha(f ? 1f : 0f).setDuration(f ? 260 : 180).start();
+        if (mark != null) mark.animate().alpha(f ? 1f : .9f).setDuration(220).start();
+    }
+
+    /** Marks an app that is on Home: a small dot inside the card's corner, ringed so it shows on bright banners. */
+    View homeDot() {
+        View dot = new View(this);
+        GradientDrawable dg = new GradientDrawable();
+        dg.setShape(GradientDrawable.OVAL);
+        dg.setColor(INK);
+        dg.setStroke(px(2), 0x59000000);
+        dot.setBackground(dg);
+        dot.setTag("pin");
+        FrameLayout.LayoutParams dlp = new FrameLayout.LayoutParams(px(14), px(14), Gravity.TOP | Gravity.END);
+        dlp.setMargins(0, px(12), px(12), 0);
+        dot.setLayoutParams(dlp);
+        return dot;
+    }
+
+    /** Where a tile's Home dot lives: inside the card in the Apps grid, on the tile elsewhere. */
+    static FrameLayout pinHost(FrameLayout t) {
+        View c = t.findViewWithTag("appcard");
+        return c instanceof FrameLayout ? (FrameLayout) c : t;
+    }
+
     /** Apps: every installed app. OK opens; hold OK or Menu adds it to Home or removes it. */
     void showApps() {
-        FrameLayout sh = sheet(.38f, SW, false);
-        TextView title = text(48, INK, f500, -1.5f);
+        FrameLayout sh = sheet(.46f, SW, false);
+        // The title and hint scroll away with the grid, like a tvOS large title.
+        TextView title = text(60, INK, f600, -1.8f);
         title.setText("Apps");
-        sh.addView(title, at(140, 72, WRAP, 64));
-        appsHint = text(30, MUTE, f500, -.2f);
-        sh.addView(appsHint, at(140, 140, WRAP, 40));
+        appsHint = text(28, MUTE, f500, -.2f);
         updateAppsHint();
 
+        // Wider than the grid so lifted cards and their shadows are never clipped at the edges.
+        final int pad = 48;
         ScrollView sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
         sv.setVerticalFadingEdgeEnabled(false);
-        sv.setFadingEdgeLength(px(80));
         sv.setSmoothScrollingEnabled(true);
         sv.setClipToPadding(false);
-        sv.setPadding(0, px(12), 0, px(60));
+        sv.setClipChildren(false);
+        sv.setPadding(px(pad), px(64), px(pad), px(120));
         FrameLayout gridBox = new FrameLayout(this);
-        View plate = new View(this);
-        plate.setBackground(new PlateDrawable(.30f, .16f, .22f, .34f, px(TILE_R)));
-        Glide glide = new Glide(gridBox, plate);
+        gridBox.setClipChildren(false);
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
+        grid.setClipChildren(false);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(WRAP, px(76));
+        tlp.leftMargin = px(16);
+        grid.addView(title, tlp);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(WRAP, px(40));
+        hlp.leftMargin = px(16);
+        hlp.topMargin = px(6);
+        hlp.bottomMargin = px(48);
+        grid.addView(appsHint, hlp);
         gridBox.addView(grid, new FrameLayout.LayoutParams(WRAP, WRAP));
         sv.addView(gridBox);
-        sh.addView(sv, at(140 - 16, 212, 1920 - 2 * 124, 1080 - 212));
+        sh.addView(sv, at(124 - pad, 0, GRID_W + 2 * pad, 1080));
 
         List<String> d = dockList();
         appTiles.clear();
@@ -1464,18 +1589,19 @@ public class HomeActivity extends Activity {
             if (i++ % GRID_COLS == 0) {
                 row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
-                grid.addView(row, new LinearLayout.LayoutParams(WRAP, px(TILE_H + 16)));
+                row.setClipChildren(false);
+                grid.addView(row, new LinearLayout.LayoutParams(WRAP, px(CELL_H)));
             }
-            FrameLayout t = tile(pkg);
-            if (d.contains(pkg)) t.addView(pinDot());
-            t.setOnFocusChangeListener((v, f) -> { markFocus(v, f); glide.focus(v, f); });
-            t.setOnClickListener(v -> { launch(pkg, v); closeOverlay(); });
+            FrameLayout t = appCard(pkg);
+            if (d.contains(pkg)) pinHost(t).addView(homeDot());
+            t.setOnFocusChangeListener((v, f) -> cardFocus(v, f));
+            t.setOnClickListener(v -> { launch(pkg, v.findViewWithTag("appcard")); closeOverlay(); });
             t.setOnLongClickListener(v -> { clickSound(); togglePin(pkg); return true; });
             t.setOnKeyListener((v, k, e) -> {
                 if (k == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP) { clickSound(); togglePin(pkg); return true; }
                 return false;
             });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(TILE_W), px(TILE_H));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(TILE_W), px(CELL_H));
             // Justified: five columns spread edge to edge, the same spacing on every row.
             lp.rightMargin = (i - 1) % GRID_COLS == GRID_COLS - 1 ? 0 : px(GRID_GAP);
             row.addView(t, lp);
@@ -1500,7 +1626,7 @@ public class HomeActivity extends Activity {
             showToast(appLabel(pkg) + " removed from Home");
             if (t != null) {
                 View dot = t.findViewWithTag("pin");
-                if (dot != null) dot.animate().alpha(0f).scaleX(.4f).scaleY(.4f).setDuration(180).withEndAction(() -> t.removeView(dot)).start();
+                if (dot != null) dot.animate().alpha(0f).scaleX(.4f).scaleY(.4f).setDuration(180).withEndAction(() -> ((ViewGroup) dot.getParent()).removeView(dot)).start();
             }
         } else if (d.size() >= MAX_DOCK) {
             showToast("Home holds " + MAX_DOCK + " apps. Remove one first.");
@@ -1509,11 +1635,11 @@ public class HomeActivity extends Activity {
             d.add(pkg);
             showToast(appLabel(pkg) + " added to Home");
             if (t != null && t.findViewWithTag("pin") == null) {
-                View dot = pinDot();
+                View dot = homeDot();
                 dot.setAlpha(0f);
                 dot.setScaleX(.4f);
                 dot.setScaleY(.4f);
-                t.addView(dot);
+                pinHost(t).addView(dot);
                 dot.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(EASE).start();
             }
         }
