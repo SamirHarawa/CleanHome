@@ -95,6 +95,8 @@ public class HomeActivity extends Activity {
     static final int GRID_COLS = 5, GRID_W = 1920 - 2 * 124, GRID_GAP = (GRID_W - GRID_COLS * TILE_W) / (GRID_COLS - 1);
     static final float MARK_SCALE = .92f;
     static final float MAT_BLUR = 56, SHEET_BLUR = 80;
+    /** The dock glass's base tint (0 = clear, 1 = black). */
+    static final float DOCK_VEIL = .08f;
 
     // Wallpapers (Unsplash License, via CleanFrame) and the time-of-day schedule
     static final String[] WALL_IDS = {"misty", "cove", "forest", "valley", "night", "peaks", "bridge",
@@ -102,7 +104,6 @@ public class HomeActivity extends Activity {
     static final String[] WALL_NAMES = {"Misty coast", "Quiet cove", "Forest mist", "Mountain valley",
             "Desert stars", "Blue peaks", "Bridge at dusk", "Sunlit ridges", "Golden hour", "Sunlit summits",
             "Gold Coast dusk", "Sydney Harbour", "Amber hills", "Alpine glow"};
-    static final float[] WALL_VEIL = {.20f, .12f, .12f, .12f, .20f, .36f, .44f, .12f, .30f, .20f, .20f, .44f, .20f, .20f};
     static final int[] SLOT_START = {5, 7, 10, 14, 17, 19, 21};
     static final String[] SLOT_NAMES = {"Dawn", "Morning", "Midday", "Afternoon", "Golden hour", "Dusk", "Night"};
     static final String[][] SLOT_WALLS = {
@@ -803,9 +804,10 @@ public class HomeActivity extends Activity {
             if (my != gen) return;
             Frost.Small matBlur = Frost.blurred(sm, MAT_BLUR * s);
             float lumMat = Frost.lum(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_X + DOCK_W), px(DOCK_Y + DOCK_H));
-            float base = (id.startsWith("bing:") || id.startsWith("gal:") || id.startsWith("live:")) ? .20f : WALL_VEIL[wallIndex(id)];
-            L.veil = Math.min(.62f, base + .30f * Frost.smooth(.42f, .85f, lumMat));
-            L.mat = Frost.region(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_W), px(DOCK_H), s, true);
+            // The dock's cards are solid banners, readable on any glass, so the glass stays light: a faint tint,
+            // a little deeper only over very bright photos so white banners still stand apart.
+            L.veil = DOCK_VEIL + .18f * Frost.smooth(.55f, .90f, lumMat);
+            L.mat = Frost.region(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_W), px(DOCK_H), s, false);
             h.post(() -> { remember(L); if (id.equals(currentWall)) present(L, instant); });
             // The glass behind panels is only needed later; make it after the photo is up.
             Frost.Small sheetBlur = Frost.blurred(sm, SHEET_BLUR * s);
@@ -905,7 +907,7 @@ public class HomeActivity extends Activity {
         dock.addView(matA, new FrameLayout.LayoutParams(MATCH, MATCH));
         dock.addView(matB, new FrameLayout.LayoutParams(MATCH, MATCH));
         matVeil = new View(this);
-        matVeil.setBackgroundColor(0x330C0A08);
+        matVeil.setBackgroundColor(Color.argb(Math.round(DOCK_VEIL * 255), 12, 10, 8));
         dock.addView(matVeil, new FrameLayout.LayoutParams(MATCH, MATCH));
         View edge = new View(this);
         edge.setBackground(new PlateDrawable(0, 0, 0, .24f, px(DOCK_R)));
@@ -1261,6 +1263,7 @@ public class HomeActivity extends Activity {
         morphAnim = null;
         morphSheet = null;
         morphGrid = null;
+        morphVeil = null;
         overlay.animate().cancel();
         for (View v : new View[]{dock, clock, date, wx, utils}) { if (v == null) continue; v.animate().cancel(); v.setAlpha(1f); v.setScaleX(1f); v.setScaleY(1f); }
         overlay.removeAllViews();
@@ -1354,6 +1357,9 @@ public class HomeActivity extends Activity {
     }
 
     /** CleanFrame's sheet: the wallpaper, heavily frosted (cleanly, no grain), under a dark veil. */
+    /** The tint layer of the most recent sheet (its full strength is in its tag). */
+    View sheetVeil;
+
     FrameLayout sheet(float veil, int widthPx, boolean right) {
         FrameLayout sh = new FrameLayout(this);
         ImageView bg = photoView();
@@ -1368,7 +1374,9 @@ public class HomeActivity extends Activity {
         View v = new View(this);
         float extra = current == null ? 0 : current.sheetExtra;
         v.setBackgroundColor(Color.argb(Math.round(Math.min(.75f, veil + extra) * 255), 10, 9, 8));
+        v.setTag(Math.min(.75f, veil + extra));
         sh.addView(v, new FrameLayout.LayoutParams(MATCH, MATCH));
+        sheetVeil = v;
         return sh;
     }
 
@@ -1642,8 +1650,17 @@ public class HomeActivity extends Activity {
     }
 
     /** p = 0: the sheet is clipped to exactly the dock's glass; p = 1: the whole screen. */
+    View morphVeil;
+    float morphVeilFrom;
+
     void morph(float p) {
         if (morphSheet == null) return;
+        // The tint goes from the dock glass's (light) to the sheet's (darker), so the hand-over doesn't jump.
+        // Changing the colour's alpha, not the view's, avoids a full-screen offscreen pass every frame.
+        if (morphVeil != null) {
+            float full = (Float) morphVeil.getTag();
+            morphVeil.setBackgroundColor(Color.argb(Math.round(full * (morphVeilFrom + (1 - morphVeilFrom) * p) * 255), 10, 9, 8));
+        }
         MorphOutline mo = (MorphOutline) morphSheet.getOutlineProvider();
         float l = px(DOCK_X), t = px(DOCK_Y), r = px(DOCK_X + DOCK_W), b = px(DOCK_Y + DOCK_H);
         mo.r.set(l * (1 - p), t * (1 - p), r + (SW - r) * p, b + (SH - b) * p);
@@ -1655,6 +1672,10 @@ public class HomeActivity extends Activity {
     void morphOpen(FrameLayout sh, View grid) {
         morphSheet = sh;
         morphGrid = grid;
+        morphVeil = sheetVeil != null && sheetVeil.getTag() instanceof Float ? sheetVeil : null;
+        float full = sheetVeil != null && sheetVeil.getTag() instanceof Float ? (Float) sheetVeil.getTag() : 1f;
+        float dockVeil = current != null ? current.veil : DOCK_VEIL;
+        morphVeilFrom = full > 0 ? Math.max(0f, Math.min(1f, dockVeil / full)) : 1f;
         sh.setOutlineProvider(new MorphOutline());
         sh.setClipToOutline(true);
         // The morph replaces showOverlay's fade and zoom.
