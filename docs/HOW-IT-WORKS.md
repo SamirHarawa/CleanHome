@@ -11,6 +11,7 @@ a third-party home screen to take over, so the installer and the app use a few s
 | `HomeKeyService` | An **accessibility service** (the "Home button helper"). Google TV's own launcher always claims the Home button; whenever Google TV's home appears, this switches straight to CleanHome. It also lets the remote's Settings and YouTube buttons work everywhere, and starts the screensaver. |
 | `Frost`, `Glide`, `Motion`, `GlideScroll` | Rendering: the frosted glass dock, the gliding focus highlight, the motion curves, and the Apps grid's tvOS-style scrolling (the focused row stays put while the grid glides under it). |
 | `AutoMark` | Turns any app's icon or banner into a clean logo in its brand colour. |
+| `Sounds` | CleanHome's own interface sounds (`assets/sounds`): a soft tick when focus moves, a click on OK, a muted bump at the end of a row. Arrow-key focus moves are handled by CleanHome itself so these replace the system beeps; the system "sound effects" switch still turns them off. |
 | `BannerArt` | Apps grid cards: checks whether an app's banner is a real one, and builds a 16:9 banner (icon above the app's name) when it isn't. |
 | `Weather` | Location and forecast, with the colour weather icons. |
 | `LiveWall` | Live wallpapers: picks an unseen picture from Google's feeds every hour, on the hour, keeps the next one downloaded and ready. |

@@ -200,6 +200,7 @@ public class HomeActivity extends Activity {
         SH = getResources().getDisplayMetrics().heightPixels;
         s = SW / 1920f;
         prefs = getSharedPreferences("home", MODE_PRIVATE);
+        sounds = new Sounds(this);
         liveWall = new LiveWall(getFilesDir(), prefs);
         if (prefs.getInt("dockv", 0) < DOCK_VERSION) {
             prefs.edit().remove("dock").putInt("dockv", DOCK_VERSION).putString("wall", "daily").apply();
@@ -342,6 +343,8 @@ public class HomeActivity extends Activity {
     protected void onResume() {
         super.onResume();
         hideBars();
+        sounds.refresh();
+        boolean back = returning != null;
         loadApps();
         buildDock();
         prewarmCards();
@@ -354,6 +357,8 @@ public class HomeActivity extends Activity {
         h.removeCallbacks(minute);
         h.postDelayed(minute, 60_000 - System.currentTimeMillis() % 60_000 + 30);
         if (overlay.getVisibility() != View.VISIBLE) focusDock(lastDockFocus);
+        if (back) arrive(returning);
+        returning = null;
         live = this;
         // Woken from the screensaver (not just passing through while it starts under the cover).
         h.postDelayed(() -> {
@@ -407,6 +412,7 @@ public class HomeActivity extends Activity {
         try { unregisterReceiver(packages); } catch (Exception ignored) { }
         try { cm.unregisterNetworkCallback(netCallback); } catch (Exception ignored) { }
         worker.shutdownNow();
+        sounds.release();
     }
 
     @Override
@@ -516,18 +522,70 @@ public class HomeActivity extends Activity {
             else if (e.getAction() == KeyEvent.ACTION_UP) Motion.press(before, false);
         }
         boolean handled = super.dispatchKeyEvent(e);
-        if (handled && e.getAction() == KeyEvent.ACTION_DOWN && getCurrentFocus() != before) {
-            int fx;
-            switch (e.getKeyCode()) {
-                case KeyEvent.KEYCODE_DPAD_LEFT: fx = AudioManager.FX_FOCUS_NAVIGATION_LEFT; break;
-                case KeyEvent.KEYCODE_DPAD_RIGHT: fx = AudioManager.FX_FOCUS_NAVIGATION_RIGHT; break;
-                case KeyEvent.KEYCODE_DPAD_UP: fx = AudioManager.FX_FOCUS_NAVIGATION_UP; break;
-                case KeyEvent.KEYCODE_DPAD_DOWN: fx = AudioManager.FX_FOCUS_NAVIGATION_DOWN; break;
-                default: fx = -1;
-            }
-            if (fx >= 0) audio().playSoundEffect(fx);
+        int dir = focusDir(kc), fx = navFx(kc);
+        if (dir == 0 || e.getAction() != KeyEvent.ACTION_DOWN) return handled;
+        if (handled) {
+            // A scrolling row or grid moved focus itself; if it kept focus on an app card, that card is at an edge.
+            if (getCurrentFocus() != before) sounds.nav(fx);
+            else edge(before, dir, e);
+            return true;
         }
-        return handled;
+        // Nobody took the key: move focus here rather than leave it to the system, which would play its own beep.
+        if (before == null) return false;
+        View next = before.focusSearch(dir);
+        if (next != null && next != before) {
+            ViewGroup root = (ViewGroup) getWindow().getDecorView();
+            android.graphics.Rect r = new android.graphics.Rect();
+            before.getFocusedRect(r);
+            try {
+                root.offsetDescendantRectToMyCoords(before, r);
+                root.offsetRectIntoDescendantCoords(next, r);
+            } catch (IllegalArgumentException ex) { r = null; }
+            if (r != null ? next.requestFocus(dir, r) : next.requestFocus(dir)) {
+                sounds.nav(fx);
+                return true;
+            }
+        }
+        edge(before, dir, e);
+        return true;
+    }
+
+    /** Nowhere to go: an app card gives a little springy nudge that way, with a muted bump. */
+    void edge(View v, int dir, KeyEvent e) {
+        if (v == null || e.getRepeatCount() != 0) return;
+        if (v.findViewWithTag("appcard") == null && v.findViewWithTag("mark") == null) return;
+        nudge(v, dir);
+        sounds.bump();
+    }
+
+    static int focusDir(int kc) {
+        switch (kc) {
+            case KeyEvent.KEYCODE_DPAD_LEFT: return View.FOCUS_LEFT;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: return View.FOCUS_RIGHT;
+            case KeyEvent.KEYCODE_DPAD_UP: return View.FOCUS_UP;
+            case KeyEvent.KEYCODE_DPAD_DOWN: return View.FOCUS_DOWN;
+            default: return 0;
+        }
+    }
+
+    static int navFx(int kc) {
+        switch (kc) {
+            case KeyEvent.KEYCODE_DPAD_LEFT: return AudioManager.FX_FOCUS_NAVIGATION_LEFT;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: return AudioManager.FX_FOCUS_NAVIGATION_RIGHT;
+            case KeyEvent.KEYCODE_DPAD_UP: return AudioManager.FX_FOCUS_NAVIGATION_UP;
+            default: return AudioManager.FX_FOCUS_NAVIGATION_DOWN;
+        }
+    }
+
+    /** At an edge: the tile leans a few px toward where you pressed, then springs back. */
+    void nudge(View t, int dir) {
+        float d = px(12);
+        float dx = dir == View.FOCUS_LEFT ? -d : dir == View.FOCUS_RIGHT ? d : 0;
+        float dy = dir == View.FOCUS_UP ? -d : dir == View.FOCUS_DOWN ? d : 0;
+        t.animate().cancel();
+        t.animate().translationX(dx).translationY(dy).setStartDelay(0).setDuration(90).setInterpolator(Motion.OUT)
+                .withEndAction(() -> t.animate().translationX(0).translationY(0).setDuration(520).setInterpolator(Motion.SPRING).start())
+                .start();
     }
 
     AudioManager am;
@@ -536,7 +594,9 @@ public class HomeActivity extends Activity {
         return am;
     }
 
-    void clickSound() { audio().playSoundEffect(AudioManager.FX_KEY_CLICK); }
+    Sounds sounds;
+
+    void clickSound() { sounds.click(); }
 
     // ================================================================ wallpaper: choice
 
@@ -981,6 +1041,57 @@ public class HomeActivity extends Activity {
         View first = row.getChildAt(0), last = row.getChildAt(n - 1);
         first.setNextFocusLeftId(first.getId());
         last.setNextFocusRightId(last.getId());
+    }
+
+    /**
+     * Back from an app: the app's dock card shrinks down from a little larger and fades in, as if the app
+     * folded back into it; the clock and buttons settle in with it. Apps not on the dock just get the settle.
+     */
+    void arrive(String pkg) {
+        int i = dockList().indexOf(pkg);
+        View card = i >= 0 && i < shelfRow.getChildCount() ? shelfRow.getChildAt(i) : null;
+        if (card != null) {
+            // Driven frame by frame on the main thread and always finished at exactly 1: a property animation
+            // started while Home is still hidden behind the app's exit transition can lose its scale part.
+            final View c = card;
+            c.animate().cancel();
+            c.setScaleX(1.35f);
+            c.setScaleY(1.35f);
+            c.setAlpha(0f);
+            ValueAnimator va = ValueAnimator.ofFloat(0f, 1f);
+            va.setStartDelay(60);
+            va.setDuration(520);
+            va.setInterpolator(GlideScroll.GLIDE);
+            va.addUpdateListener(a -> {
+                float p = (Float) a.getAnimatedValue();
+                c.setScaleX(1.35f - .35f * p);
+                c.setScaleY(1.35f - .35f * p);
+                c.setAlpha(Math.min(1f, p * 1.6f));
+            });
+            va.addListener(new Settle(c));
+            va.start();
+        }
+        final View[] top = {clock, date, wx, utils};
+        for (View v : top) { v.animate().cancel(); v.setAlpha(0f); v.setTranslationY(-px(10)); }
+        ValueAnimator tv = ValueAnimator.ofFloat(0f, 1f);
+        tv.setStartDelay(120);
+        tv.setDuration(480);
+        tv.setInterpolator(Motion.OUT);
+        tv.addUpdateListener(a -> {
+            float p = (Float) a.getAnimatedValue();
+            for (View v : top) { v.setAlpha(p); v.setTranslationY(-px(10) * (1 - p)); }
+        });
+        for (View v : top) tv.addListener(new Settle(v));
+        tv.start();
+    }
+
+    /** Puts a view back to its resting size and opacity when its animation ends or is cut short. */
+    static final class Settle extends android.animation.AnimatorListenerAdapter {
+        final View v;
+        Settle(View v) { this.v = v; }
+        void rest() { v.setScaleX(1f); v.setScaleY(1f); v.setAlpha(1f); v.setTranslationX(0f); v.setTranslationY(0f); }
+        @Override public void onAnimationEnd(android.animation.Animator a) { rest(); }
+        @Override public void onAnimationCancel(android.animation.Animator a) { rest(); }
     }
 
     void focusDock(int i) {
@@ -2606,7 +2717,13 @@ public class HomeActivity extends Activity {
     void launch(String pkg) { launch(pkg, null); }
 
     /** Opens an app; from a tile, the app zooms up out of that tile. */
+    /** The app last opened from Home, so its card can settle back into place when Home returns. */
+    String returning;
+
     void launch(String pkg, View from) {
+        returning = pkg;
+        int di = dockList().indexOf(pkg);
+        if (di >= 0) lastDockFocus = di;
         android.os.Bundle opts = null;
         if (from != null && from.isAttachedToWindow()) {
             try { opts = android.app.ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle(); }
