@@ -1632,6 +1632,46 @@ public class HomeActivity extends Activity {
      */
     FrameLayout appCard(String pkg) { return appCard(pkg, CARD_W, CARD_H, false); }
 
+    // A soft shadow straight below each card, the same for every card (Android's own elevation shadows are lit
+    // from the top centre of the screen, so cards near the edges cast them sideways).
+    static final int SHADOW_BLUR = 18, SHADOW_PAD = 30, SHADOW_DY = 6, SHADOW_DY_FOCUS = 14;
+    static final float SHADOW_REST = .45f;
+    final Map<String, Bitmap> shadows = new HashMap<>();
+
+    Bitmap shadowFor(int cw, int ch) {
+        String k = cw + "x" + ch;
+        Bitmap b = shadows.get(k);
+        if (b != null) return b;
+        int pad = px(SHADOW_PAD), w = px(cw) + 2 * pad, hh = px(ch) + 2 * pad;
+        b = Bitmap.createBitmap(w, hh, Bitmap.Config.ALPHA_8);
+        Canvas c = new Canvas(b);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0x8C000000);
+        p.setMaskFilter(new android.graphics.BlurMaskFilter(px(SHADOW_BLUR), android.graphics.BlurMaskFilter.Blur.NORMAL));
+        // A little narrower than the card, so it reads as being underneath rather than a dark outline.
+        float in = px(10);
+        c.drawRoundRect(new RectF(pad + in, pad + in * .6f, w - pad - in, hh - pad), px(CARD_R), px(CARD_R), p);
+        b.prepareToDraw();
+        shadows.put(k, b);
+        return b;
+    }
+
+    void addShadow(FrameLayout t, int cw, int ch) {
+        ImageView sv = new ImageView(this);
+        sv.setImageBitmap(shadowFor(cw, ch));
+        sv.setColorFilter(new PorterDuffColorFilter(Color.BLACK, PorterDuff.Mode.SRC_IN));
+        sv.setTag("shadow");
+        sv.setAlpha(SHADOW_REST);
+        sv.setTranslationY(px(SHADOW_DY));
+        int pad = px(SHADOW_PAD);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(px(cw) + 2 * pad, px(ch) + 2 * pad, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = -pad;
+        sv.setPivotX(lp.width / 2f);
+        sv.setPivotY(lp.height / 2f);
+        // Behind the card: the tile's first child.
+        t.addView(sv, 0, lp);
+    }
+
     /** dock: no name underneath (the banner says it); the card lifts a little less to stay inside the dock. */
     FrameLayout appCard(String pkg, int cw, int ch, boolean dock) {
         FrameLayout t = new FrameLayout(this);
@@ -1654,7 +1694,7 @@ public class HomeActivity extends Activity {
             iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
             card.setBackgroundColor(0xFF1C1D20);
             card.addView(iv, new FrameLayout.LayoutParams(MATCH, MATCH));
-            card.setElevation(px(6));
+            addShadow(t, cw, ch);
         } else {
             card.setBackground(new PlateDrawable(.13f, .07f, .10f, .26f, px(CARD_R)));
             // Brighter glass that fades in on focus, under the mark.
@@ -1701,15 +1741,18 @@ public class HomeActivity extends Activity {
         if (!f && dismissing && t.getParent() != null && isInOverlay(t)) return;
         View card = t.findViewWithTag("appcard"), label = t.findViewWithTag("label");
         View sheen = t.findViewWithTag("sheen"), glow = t.findViewWithTag("glow"), mark = t.findViewWithTag("mark");
+        View shadow = t.findViewWithTag("shadow");
         boolean banner = glow == null;
         boolean inDock = card.getWidth() < px(CARD_W) - 1;
         float lift = inDock ? 1.08f : 1.12f;
         if (f) {
-            card.animate().scaleX(lift).scaleY(lift).translationY(inDock ? 0 : -px(4)).translationZ(px(banner ? 22 : 0))
+            if (shadow != null) shadow.animate().alpha(1f).scaleX(lift).scaleY(lift).translationY(px(SHADOW_DY_FOCUS)).setDuration(460).setInterpolator(Motion.SPRING).start();
+            card.animate().scaleX(lift).scaleY(lift).translationY(inDock ? 0 : -px(4))
                     .setDuration(460).setInterpolator(Motion.SPRING).start();
             if (label != null) label.animate().alpha(1f).translationY(px(6)).setDuration(260).setInterpolator(Motion.OUT).start();
         } else {
-            card.animate().scaleX(1f).scaleY(1f).translationY(0).translationZ(0).setDuration(280).setInterpolator(Motion.OUT).start();
+            if (shadow != null) shadow.animate().alpha(SHADOW_REST).scaleX(1f).scaleY(1f).translationY(px(SHADOW_DY)).setDuration(280).setInterpolator(Motion.OUT).start();
+            card.animate().scaleX(1f).scaleY(1f).translationY(0).setDuration(280).setInterpolator(Motion.OUT).start();
             if (label != null) label.animate().alpha(0f).translationY(0).setDuration(160).setInterpolator(Motion.OUT).start();
         }
         sheen.animate().alpha(f ? 1f : 0f).setDuration(f ? 300 : 180).start();
