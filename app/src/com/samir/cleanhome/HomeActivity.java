@@ -1433,7 +1433,7 @@ public class HomeActivity extends Activity {
             Drawable b = ri.activityInfo.loadBanner(pm);
             if (BannerArt.usable(b)) d = b;
             else d = new android.graphics.drawable.BitmapDrawable(getResources(),
-                    BannerArt.fromIcon(ri.loadIcon(pm), brandColor(pkg), px(CARD_W), px(CARD_H)));
+                    BannerArt.fromIcon(ri.loadIcon(pm), brandColor(pkg), appLabel(pkg), Typeface.create(Typeface.SANS_SERIF, 500, false), px(CARD_W), px(CARD_H)));
             android.util.Log.i("CleanHomeCard", pkg + (d == b ? " banner" : " built from icon"));
         } catch (Exception e) { return null; }
         cardArts.put(key, d);

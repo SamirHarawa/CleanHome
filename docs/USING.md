@@ -58,8 +58,8 @@ On the dock, every app gets a clean logo in its own brand colour, so the dock lo
 install later (CleanHome reads the colour and shape from the app's own icon).
 
 In the Apps grid, each app shows its full-colour Android TV banner on a rounded card, like Apple TV. If an app has no
-proper banner (none at all, a square icon standing in for one, or a blank template), CleanHome builds a banner from the
-app's icon instead, so every logo fits its card.
+proper banner (none at all, a square icon standing in for one, or a blank template), CleanHome builds one instead: the
+app's icon with its name underneath, sized to fit the card.
 
 ## Screensaver
 

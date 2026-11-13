@@ -6,6 +6,9 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.Typeface;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -43,8 +46,11 @@ final class BannerArt {
         return !(maxSat < .12f && contrast < .3f);
     }
 
-    /** A w x h card built from the app's icon. brand tints the card when the icon has no backdrop of its own. */
-    static Bitmap fromIcon(Drawable icon, int brand, int w, int h) {
+    /**
+     * A w x h banner built from the app's icon: the logo above the app's name, centred, like the banners
+     * TV apps ship. brand tints the card when the icon has no backdrop of its own.
+     */
+    static Bitmap fromIcon(Drawable icon, int brand, String name, Typeface face, int w, int h) {
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
         if (icon instanceof AdaptiveIconDrawable) {
@@ -57,21 +63,22 @@ final class BannerArt {
                 bg.draw(c);
             } else c.drawColor(backdrop(brand));
             if (fg != null) {
-                // The layer is 108 units with the logo inside the middle ~66: make that ~78% of the card height.
-                int s = Math.round(h * .78f * 108f / 66f);
-                fg.setBounds((w - s) / 2, (h - s) / 2, (w + s) / 2, (h + s) / 2);
+                // The layer is 108 units with the logo inside the middle ~66: make that ~56% of the card height.
+                int s = Math.round(h * .56f * 108f / 66f), cy = Math.round(h * ICON_CY);
+                fg.setBounds((w - s) / 2, cy - s / 2, (w + s) / 2, cy + s / 2);
                 fg.draw(c);
             }
+            label(c, out, name, face, w, h);
             return out;
         }
         // A plain icon: put it on its own edge colour if it has a solid backdrop, else on a tinted card.
-        int s = Math.round(h * .66f);
+        int s = Math.round(h * .48f);
         Bitmap ib = render(icon, s, s);
         int edge = edgeColor(ib);
         boolean solid = Color.alpha(edge) > 230;
         c.drawColor(solid ? edge : backdrop(brand));
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        float l = (w - s) / 2f, t = (h - s) / 2f;
+        float l = (w - s) / 2f, t = h * ICON_CY - s / 2f;
         int save = c.save();
         Path clip = new Path();
         clip.addRoundRect(new RectF(l, t, l + s, t + s), s * .22f, s * .22f, Path.Direction.CW);
@@ -79,7 +86,37 @@ final class BannerArt {
         c.drawBitmap(ib, l, t, p);
         c.restoreToCount(save);
         ib.recycle();
+        label(c, out, name, face, w, h);
         return out;
+    }
+
+    /** Vertical centre of the logo, as a fraction of the card height; the name sits below it. */
+    static final float ICON_CY = .39f;
+
+    /** The app's name, centred under the logo, in white or near-black, whichever reads on the card.
+     *  Drawn in the system font (Roboto), like the banners TV apps ship. */
+    static void label(Canvas c, Bitmap card, String name, Typeface face, int w, int h) {
+        if (name == null || name.isEmpty()) return;
+        float base = h * .86f, size = h * .158f;
+        // Pick the ink from the card behind the text.
+        long lum = 0, n = 0;
+        for (int y = Math.round(base - size); y < Math.min(h, Math.round(base + size * .3f)); y += 2)
+            for (int x = w / 8; x < w * 7 / 8; x += 3) {
+                int p = card.getPixel(x, y);
+                lum += Math.round(.2126f * Color.red(p) + .7152f * Color.green(p) + .0722f * Color.blue(p));
+                n++;
+            }
+        boolean light = n > 0 && lum / n > 150;
+        TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+        tp.setTypeface(face);
+        tp.setColor(light ? 0xFF1C1C1E : Color.WHITE);
+        tp.setTextSize(size);
+        tp.setLetterSpacing(-.01f);
+        float max = w * .86f;
+        // Long names shrink a little before they are cut short.
+        while (tp.measureText(name) > max && tp.getTextSize() > h * .105f) tp.setTextSize(tp.getTextSize() - 1);
+        String text = String.valueOf(TextUtils.ellipsize(name, tp, max, TextUtils.TruncateAt.END));
+        c.drawText(text, (w - tp.measureText(text)) / 2f, base, tp);
     }
 
     /** A dark card faintly tinted with the brand colour, like glass over it. */
