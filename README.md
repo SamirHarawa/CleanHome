@@ -12,7 +12,7 @@ Assistant voice button, Chromecast, AirPlay, the Play Store, your accounts and a
 ## What you get
 
 - **Big clock, date and live weather** for your area, with colour weather icons.
-- **A dock of up to 6 favourite apps** with consistent brand-coloured logos, for every app, including ones you install later.
+- **A dock of up to 6 favourite apps** as Apple TV-style banner cards that lift when selected.
 - **Live wallpapers from Google**: a new picture every hour on the hour, straight from the internet and no repeats for months - the same kind of photos as the Google TV screensaver (or Google Arts & Culture masterpieces). Bing's photo of the day and a built-in set are there too.
 - **Smooth, gentle animations** and the familiar navigation sounds.
 - **All apps** as a grid of Apple TV-style banner cards that lift when selected. Hold OK on any app to add it to (or remove it from) the dock.

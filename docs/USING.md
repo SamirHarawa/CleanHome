@@ -52,14 +52,12 @@ Open the **Wallpaper** icon. Moving over a choice previews it; OK keeps it; Back
 
 On bright photos CleanHome quietly darkens the area behind the text and the dock so everything stays readable.
 
-## App logos
+## App banners
 
-On the dock, every app gets a clean logo in its own brand colour, so the dock looks consistent - including apps you
-install later (CleanHome reads the colour and shape from the app's own icon).
-
-In the Apps grid, each app shows its full-colour Android TV banner on a rounded card, like Apple TV. If an app has no
-proper banner (none at all, a square icon standing in for one, or a blank template), CleanHome builds one instead: the
-app's icon with its name underneath, sized to fit the card.
+The dock and the Apps grid show each app as its full-colour Android TV banner on a rounded card, like Apple TV. In
+Apps, the name fades in under the card you move to; the dock leaves it out, since the banner already shows it. If an app has no proper banner (none at all, a square icon standing in for
+one, or a blank template), CleanHome builds one instead: the app's icon with its name underneath, sized to fit the
+card. This works for apps you install later too.
 
 ## Screensaver
 

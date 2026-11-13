@@ -506,7 +506,7 @@ public class HomeActivity extends Activity {
         View before = getCurrentFocus();
         int kc = e.getKeyCode();
         if (before != null && (kc == KeyEvent.KEYCODE_DPAD_CENTER || kc == KeyEvent.KEYCODE_ENTER || kc == KeyEvent.KEYCODE_NUMPAD_ENTER)
-                && (before.findViewWithTag("mark") != null || before.getParent() == utils)) {
+                && (before.findViewWithTag("mark") != null || before.findViewWithTag("appcard") != null || before.getParent() == utils)) {
             if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) Motion.press(before, true);
             else if (e.getAction() == KeyEvent.ACTION_UP) Motion.press(before, false);
         }
@@ -947,21 +947,21 @@ public class HomeActivity extends Activity {
         for (int i = 0; i < d.size(); i++) {
             final int idx = i;
             final String pkg = d.get(i);
-            View t = tile(pkg);
+            // The app's banner card, centred in the dock.
+            View t = appCard(pkg, DOCK_CARD_W, DOCK_CARD_H, true);
             t.setOnFocusChangeListener((v, f) -> {
-                markFocus(v, f);
-                dockGlide.focus(v, f);
+                cardFocus(v, f);
                 if (f) lastDockFocus = idx;
             });
-            t.setOnClickListener(v -> launch(pkg, v));
+            t.setOnClickListener(v -> launch(pkg, v.findViewWithTag("appcard")));
             t.setOnLongClickListener(v -> { clickSound(); dockMenu(pkg); return true; });
             t.setOnKeyListener((v, k, e) -> {
                 if (k == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP) { clickSound(); dockMenu(pkg); return true; }
                 return false;
             });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(TILE_W), px(TILE_H));
-            lp.topMargin = px(16);
-            lp.rightMargin = i == d.size() - 1 ? 0 : px(TILE_GAP);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(DOCK_CARD_W), px(DOCK_CARD_H));
+            lp.topMargin = px((DOCK_H - DOCK_CARD_H) / 2f);
+            lp.rightMargin = i == d.size() - 1 ? 0 : px(DOCK_CARD_GAP);
             shelfRow.addView(t, lp);
         }
         pinEnds(shelfRow);
@@ -1417,9 +1417,11 @@ public class HomeActivity extends Activity {
 
     /** All Apps card (stage px): 16:9 like Android TV banners; the name shows only under the focused card. */
     static final int CARD_W = 264, CARD_H = 148, CARD_R = 22, CELL_H = 232;
+    /** Dock cards: 16:9 banners with an even ~40 px margin around and between them. */
+    static final int DOCK_CARD_W = 240, DOCK_CARD_H = 135,
+            DOCK_CARD_GAP = (DOCK_W - 80 - MAX_DOCK * DOCK_CARD_W) / (MAX_DOCK - 1);
 
     final Map<String, Drawable> cardArts = new HashMap<>();
-
     /** The app's banner if it is a real one, else a card built from its icon; cached per app version. */
     Drawable cardArt(String pkg) {
         ResolveInfo ri = apps.get(pkg);
@@ -1445,7 +1447,10 @@ public class HomeActivity extends Activity {
      * a sheen when focused, with its name fading in underneath. Shows the app's banner (or one built from
      * its icon); if even that fails, its brand mark on frosted glass.
      */
-    FrameLayout appCard(String pkg) {
+    FrameLayout appCard(String pkg) { return appCard(pkg, CARD_W, CARD_H, false); }
+
+    /** dock: no name underneath (the banner says it); the card lifts a little less to stay inside the dock. */
+    FrameLayout appCard(String pkg, int cw, int ch, boolean dock) {
         FrameLayout t = new FrameLayout(this);
         t.setFocusable(true);
         t.setClickable(true);
@@ -1455,8 +1460,8 @@ public class HomeActivity extends Activity {
         card.setTag("appcard");
         card.setOutlineProvider(new RoundOutline(px(CARD_R)));
         card.setClipToOutline(true);
-        card.setPivotX(px(CARD_W) / 2f);
-        card.setPivotY(px(CARD_H) / 2f);
+        card.setPivotX(px(cw) / 2f);
+        card.setPivotY(px(ch) / 2f);
 
         Drawable banner = cardArt(pkg);
         View glow = null;
@@ -1491,7 +1496,8 @@ public class HomeActivity extends Activity {
         sheen.setTag("sheen");
         card.addView(sheen, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        t.addView(card, new FrameLayout.LayoutParams(px(CARD_W), px(CARD_H), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        t.addView(card, new FrameLayout.LayoutParams(px(cw), px(ch), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        if (dock) return t;
 
         TextView label = text(27, INK, f500, -.4f);
         label.setText(appLabel(pkg));
@@ -1501,8 +1507,8 @@ public class HomeActivity extends Activity {
         label.setAlpha(0f);
         label.setTag("label");
         label.setShadowLayer(px(10), 0, px(2), 0x66000000);
-        FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(px(CARD_W + 40), px(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        llp.topMargin = px(CARD_H + 24);
+        FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(px(cw + 40), px(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        llp.topMargin = px(ch + 24);
         t.addView(label, llp);
         return t;
     }
@@ -1511,13 +1517,15 @@ public class HomeActivity extends Activity {
         View card = t.findViewWithTag("appcard"), label = t.findViewWithTag("label");
         View sheen = t.findViewWithTag("sheen"), glow = t.findViewWithTag("glow"), mark = t.findViewWithTag("mark");
         boolean banner = glow == null;
+        boolean inDock = card.getWidth() < px(CARD_W) - 1;
+        float lift = inDock ? 1.08f : 1.12f;
         if (f) {
-            card.animate().scaleX(1.12f).scaleY(1.12f).translationY(-px(4)).translationZ(px(banner ? 22 : 0))
+            card.animate().scaleX(lift).scaleY(lift).translationY(inDock ? 0 : -px(4)).translationZ(px(banner ? 22 : 0))
                     .setDuration(460).setInterpolator(Motion.SPRING).start();
-            label.animate().alpha(1f).translationY(px(6)).setDuration(260).setInterpolator(Motion.OUT).start();
+            if (label != null) label.animate().alpha(1f).translationY(px(6)).setDuration(260).setInterpolator(Motion.OUT).start();
         } else {
             card.animate().scaleX(1f).scaleY(1f).translationY(0).translationZ(0).setDuration(280).setInterpolator(Motion.OUT).start();
-            label.animate().alpha(0f).translationY(0).setDuration(160).setInterpolator(Motion.OUT).start();
+            if (label != null) label.animate().alpha(0f).translationY(0).setDuration(160).setInterpolator(Motion.OUT).start();
         }
         sheen.animate().alpha(f ? 1f : 0f).setDuration(f ? 300 : 180).start();
         if (glow != null) glow.animate().alpha(f ? 1f : 0f).setDuration(f ? 260 : 180).start();
