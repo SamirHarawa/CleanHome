@@ -20,13 +20,29 @@ public class HomeKeyService extends AccessibilityService {
     @Override protected void onServiceConnected() {
         instance = this;
         // Connected while Google TV home is already showing (after an update or at boot): leave it.
+        // At boot this service can connect before Google TV has drawn its home, and the window event for it
+        // may come before we are listening, so keep looking for a while rather than checking once.
+        bootChecks = 0;
+        h.post(bootCheck);
+    }
+
+    int bootChecks;
+    final Runnable bootCheck = this::bootCheck;
+
+    void bootCheck() {
         try {
             android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null && GTV.contentEquals(String.valueOf(root.getPackageName()))) {
-                lastWindow = "home.HomeActivity";
-                goHome();
+            if (root != null) {
+                String pkg = String.valueOf(root.getPackageName());
+                if (GTV.equals(pkg) && !lastWindow.contains(".dashboard.") && !lastWindow.endsWith("ProfileChooserActivity")) {
+                    lastWindow = "home.HomeActivity";
+                    goHome();
+                    return;
+                }
+                if (getPackageName().equals(pkg)) return; // CleanHome is up: nothing to do
             }
         } catch (Exception ignored) { }
+        if (++bootChecks < 40) h.postDelayed(bootCheck, 500); // up to 20 s
     }
     @Override public boolean onUnbind(Intent i) { instance = null; return super.onUnbind(i); }
 
