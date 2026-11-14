@@ -52,12 +52,61 @@ final class Motion {
         }
     }
 
-    /** Fade and rise into place after a delay. */
+    /** Views that are rising right now, so a new rise (or anything else) can finish the old one cleanly. */
+    static final java.util.WeakHashMap<View, android.animation.ValueAnimator> RISING = new java.util.WeakHashMap<>();
+
+    /**
+     * Fade and rise into place after a delay. Its own animator, not the view's animate(): other effects
+     * (a nudge, a press) cancel animate() freely, and must never leave a view stuck half-faded. However it
+     * stops, the view ends fully visible and in place.
+     */
     static void rise(View v, float dy, long delay, long dur) {
+        android.animation.ValueAnimator old = RISING.remove(v);
+        if (old != null) old.cancel();
         v.animate().cancel();
         v.setAlpha(0f);
         v.setTranslationY(dy);
-        // A cached layer while it fades: the view is drawn once, not re-blended every frame.
-        v.animate().alpha(1f).translationY(0).setStartDelay(delay).setDuration(dur).setInterpolator(OUT).withLayer().start();
+        android.animation.ValueAnimator a = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        a.setStartDelay(delay);
+        a.setDuration(dur);
+        a.setInterpolator(OUT);
+        a.addUpdateListener(new RiseStep(v, dy));
+        a.addListener(new RiseEnd(v));
+        RISING.put(v, a);
+        a.start();
+    }
+
+    /** Ends any rise on v now, leaving it fully shown. */
+    static void settle(View v) {
+        android.animation.ValueAnimator a = RISING.remove(v);
+        if (a != null) a.end();
+    }
+
+    static final class RiseStep implements android.animation.ValueAnimator.AnimatorUpdateListener {
+        final View v; final float dy;
+        RiseStep(View v, float dy) { this.v = v; this.dy = dy; }
+        @Override public void onAnimationUpdate(android.animation.ValueAnimator a) {
+            float p = (Float) a.getAnimatedValue();
+            v.setAlpha(p);
+            v.setTranslationY(dy * (1 - p));
+        }
+    }
+
+    static final class RiseEnd extends android.animation.AnimatorListenerAdapter {
+        final View v;
+        RiseEnd(View v) { this.v = v; }
+        @Override public void onAnimationStart(android.animation.Animator a) {
+            // A cached layer while it fades: drawn once, not re-blended every frame. Set, not built here:
+            // the render thread builds it with the next frame instead of the main thread stalling for it.
+            v.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
+        @Override public void onAnimationEnd(android.animation.Animator a) { done(a); }
+        @Override public void onAnimationCancel(android.animation.Animator a) { done(a); }
+        void done(android.animation.Animator a) {
+            if (RISING.get(v) == a) RISING.remove(v);
+            v.setAlpha(1f);
+            v.setTranslationY(0f);
+            v.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
     }
 }

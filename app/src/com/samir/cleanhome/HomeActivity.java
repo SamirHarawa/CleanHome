@@ -231,7 +231,7 @@ public class HomeActivity extends Activity {
         root.addView(clock, at(136, 52, WRAP, 104));
         date = text(30, 0xE6F6F1E7, f500, -.2f);
         date.setShadowLayer(px(4), 0, px(1), 0x4D000000);
-        root.addView(date, at(142, 158, WRAP, 40));
+        root.addView(date, at(145, 158, WRAP, 40)); // text edges line up with the dock's first card (x 146)
 
         // Weather under the date, never wider than it: a coloured icon with the temperature, then the
         // conditions and today's high and low on a second line.
@@ -261,10 +261,9 @@ public class HomeActivity extends Activity {
         wxText.setSingleLine(true);
         LinearLayout.LayoutParams xlp = new LinearLayout.LayoutParams(WRAP, WRAP);
         xlp.topMargin = px(6);
-        xlp.leftMargin = px(2);
         wx.addView(wxText, xlp);
         wx.setVisibility(View.INVISIBLE);
-        root.addView(wx, at(140, 252, WRAP, WRAP));
+        root.addView(wx, at(146, 252, WRAP, WRAP));
         showWeather(Weather.cached(prefs), false);
 
         utils = new LinearLayout(this);
@@ -283,7 +282,7 @@ public class HomeActivity extends Activity {
         pinEnds(utils);
         FrameLayout.LayoutParams ulp = new FrameLayout.LayoutParams(WRAP, px(64), Gravity.TOP | Gravity.END);
         ulp.topMargin = px(76);
-        ulp.rightMargin = px(122);
+        ulp.rightMargin = px(132); // the last icon ends where the dock's last card does
         root.addView(utils, ulp);
 
         utilLabel = text(28, INK, f500, -.2f);
@@ -831,6 +830,8 @@ public class HomeActivity extends Activity {
         String id;
         Bitmap bg, mat, sheet;
         float veil, sheetExtra;
+        /** The glass's tint: the photo's own colour around the dock, deepened (rgb only). */
+        int tint = Color.rgb(12, 10, 8);
     }
 
     final Map<String, Look> looks = new LinkedHashMap<>();
@@ -867,6 +868,7 @@ public class HomeActivity extends Activity {
             // The dock's cards are solid banners, readable on any glass, so the glass stays light: a faint tint,
             // a little deeper only over very bright photos so white banners still stand apart.
             L.veil = DOCK_VEIL + .18f * Frost.smooth(.55f, .90f, lumMat);
+            L.tint = glassTint(Frost.avg(matBlur, px(DOCK_X), px(DOCK_Y - 200), px(DOCK_X + DOCK_W), px(DOCK_Y + DOCK_H)));
             L.mat = Frost.region(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_W), px(DOCK_H), s, false);
             h.post(() -> { remember(L); if (id.equals(currentWall)) present(L, instant); });
             // The glass behind panels is only needed later; make it after the photo is up.
@@ -875,6 +877,18 @@ public class HomeActivity extends Activity {
             Bitmap sheet = Frost.region(sheetBlur, 0, 0, SW, SH, s, false);
             h.post(() -> L.sheet = sheet);
         });
+    }
+
+    /**
+     * The dock glass takes on the photo's colour: the average around the dock, kept to a gentle saturation
+     * and made deep, so it reads as tinted glass (blue over sea, amber over a sunset) and never as paint.
+     */
+    static int glassTint(int avg) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(avg, hsv);
+        hsv[1] = Math.min(.55f, hsv[1] * 1.25f);
+        hsv[2] = .22f;
+        return Color.HSVToColor(hsv);
     }
 
     /** Keeps the two most recent looks (the current one always stays). */
@@ -909,7 +923,7 @@ public class HomeActivity extends Activity {
     /** Crossfades the photo and the dock glass together. */
     void present(Look L, boolean instant) {
         current = L;
-        int veilTo = Color.argb(Math.round(L.veil * 255), 12, 10, 8);
+        int veilTo = (Math.round(L.veil * 255) << 24) | (L.tint & 0xFFFFFF);
         if (instant || bgA.getDrawable() == null) matVeil.setBackgroundColor(veilTo);
         else {
             int from = matVeil.getBackground() instanceof android.graphics.drawable.ColorDrawable
@@ -919,7 +933,23 @@ public class HomeActivity extends Activity {
             va.addUpdateListener(an -> matVeil.setBackgroundColor((Integer) an.getAnimatedValue()));
             va.start();
         }
-        if (instant || bgA.getDrawable() == null) {
+        if (bgA.getDrawable() == null) {
+            // The very first photo after start-up: it fades up out of the dark instead of popping in.
+            bgA.setImageBitmap(L.bg);
+            matA.setImageBitmap(L.mat);
+            bgB.setAlpha(0f);
+            matB.setAlpha(0f);
+            for (View v : new View[]{bgA, matA}) {
+                v.setAlpha(0f);
+                v.animate().alpha(1f).setStartDelay(0).setDuration(900).setInterpolator(Motion.OUT).start();
+            }
+            return;
+        }
+        if (instant) {
+            bgA.animate().cancel();
+            matA.animate().cancel();
+            bgA.setAlpha(1f);
+            matA.setAlpha(1f);
             bgA.setImageBitmap(L.bg);
             matA.setImageBitmap(L.mat);
             bgB.setAlpha(0f);
@@ -935,6 +965,7 @@ public class HomeActivity extends Activity {
         bgB.setVisibility(View.VISIBLE);
         matB.setVisibility(View.VISIBLE);
         bgB.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        focusPull(bgB);
         matB.animate().alpha(1f).setDuration(1200).setInterpolator(Motion.INOUT).start();
         bgB.animate().alpha(1f).setDuration(1200).setInterpolator(Motion.INOUT).withEndAction(() -> {
             bgA.setImageBitmap(L.bg);
@@ -945,6 +976,37 @@ public class HomeActivity extends Activity {
             bgB.setVisibility(View.INVISIBLE);
             matB.setVisibility(View.INVISIBLE);
         }).start();
+    }
+
+    /**
+     * The incoming photo starts a touch large and settles into place as it fades in, like a lens finding
+     * its framing. (A real blur pull was tried: far too heavy for a TV's GPU at full screen.)
+     */
+    void focusPull(View v) {
+        ValueAnimator va = ValueAnimator.ofFloat(1f, 0f);
+        va.setDuration(1600);
+        va.setInterpolator(Motion.OUT);
+        va.addUpdateListener(new PullStep(v));
+        va.addListener(new PullEnd(v));
+        va.start();
+    }
+
+    static final class PullStep implements ValueAnimator.AnimatorUpdateListener {
+        final View v;
+        PullStep(View v) { this.v = v; }
+        @Override public void onAnimationUpdate(ValueAnimator a) {
+            float k = (Float) a.getAnimatedValue();
+            v.setScaleX(1f + .035f * k);
+            v.setScaleY(1f + .035f * k);
+        }
+    }
+
+    static final class PullEnd extends android.animation.AnimatorListenerAdapter {
+        final View v;
+        PullEnd(View v) { this.v = v; }
+        void rest() { v.setScaleX(1f); v.setScaleY(1f); }
+        @Override public void onAnimationEnd(android.animation.Animator a) { rest(); }
+        @Override public void onAnimationCancel(android.animation.Animator a) { rest(); }
     }
 
     ImageView photoView() {
@@ -1054,6 +1116,7 @@ public class HomeActivity extends Activity {
             // Driven frame by frame on the main thread and always finished at exactly 1: a property animation
             // started while Home is still hidden behind the app's exit transition can lose its scale part.
             final View c = card;
+            Motion.settle(c);
             c.animate().cancel();
             c.setScaleX(1.35f);
             c.setScaleY(1.35f);
@@ -1072,7 +1135,7 @@ public class HomeActivity extends Activity {
             va.start();
         }
         final View[] top = {clock, date, wx, utils};
-        for (View v : top) { v.animate().cancel(); v.setAlpha(0f); v.setTranslationY(-px(10)); }
+        for (View v : top) { Motion.settle(v); v.animate().cancel(); v.setAlpha(0f); v.setTranslationY(-px(10)); }
         ValueAnimator tv = ValueAnimator.ofFloat(0f, 1f);
         tv.setStartDelay(120);
         tv.setDuration(480);
@@ -1719,6 +1782,19 @@ public class HomeActivity extends Activity {
         sheen.setTag("sheen");
         card.addView(sheen, new FrameLayout.LayoutParams(MATCH, MATCH));
 
+        if (banner != null) {
+            // Glare: a soft slanted band of light that crosses the card once when it is chosen.
+            View sweep = new View(this);
+            sweep.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                    new int[]{0x00FFFFFF, 0x14FFFFFF, 0x38FFFFFF, 0x14FFFFFF, 0x00FFFFFF}));
+            sweep.setTag("sweep");
+            sweep.setVisibility(View.GONE);
+            sweep.setRotation(18f);
+            FrameLayout.LayoutParams wlp = new FrameLayout.LayoutParams(Math.round(px(cw) * .42f), px(ch) * 2, Gravity.TOP | Gravity.START);
+            wlp.topMargin = -px(ch) / 2;
+            card.addView(sweep, wlp);
+        }
+
         t.addView(card, new FrameLayout.LayoutParams(px(cw), px(ch), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         if (dock) return t;
 
@@ -1756,6 +1832,17 @@ public class HomeActivity extends Activity {
             if (label != null) label.animate().alpha(0f).translationY(0).setDuration(160).setInterpolator(Motion.OUT).start();
         }
         sheen.animate().alpha(f ? 1f : 0f).setDuration(f ? 300 : 180).start();
+        View sweep = t.findViewWithTag("sweep");
+        if (sweep != null) {
+            sweep.animate().cancel();
+            if (f) {
+                float bw = sweep.getLayoutParams().width;
+                sweep.setTranslationX(-bw * 1.6f);
+                sweep.setVisibility(View.VISIBLE);
+                sweep.animate().translationX(card.getLayoutParams().width + bw * .6f).setStartDelay(160).setDuration(820)
+                        .setInterpolator(Motion.INOUT).withEndAction(() -> sweep.setVisibility(View.GONE)).start();
+            } else sweep.setVisibility(View.GONE);
+        }
         if (glow != null) glow.animate().alpha(f ? 1f : 0f).setDuration(f ? 260 : 180).start();
         if (mark != null) mark.animate().alpha(f ? 1f : .9f).setDuration(220).start();
     }
@@ -1813,7 +1900,11 @@ public class HomeActivity extends Activity {
         // Changing the colour's alpha, not the view's, avoids a full-screen offscreen pass every frame.
         if (morphVeil != null) {
             float full = (Float) morphVeil.getTag();
-            morphVeil.setBackgroundColor(Color.argb(Math.round(full * (morphVeilFrom + (1 - morphVeilFrom) * p) * 255), 10, 9, 8));
+            int from = current != null ? current.tint : Color.rgb(10, 9, 8);
+            morphVeil.setBackgroundColor(Color.argb(Math.round(full * (morphVeilFrom + (1 - morphVeilFrom) * p) * 255),
+                    Math.round(Color.red(from) + (10 - Color.red(from)) * p),
+                    Math.round(Color.green(from) + (9 - Color.green(from)) * p),
+                    Math.round(Color.blue(from) + (8 - Color.blue(from)) * p)));
         }
         MorphOutline mo = (MorphOutline) morphSheet.getOutlineProvider();
         float l = px(DOCK_X), t = px(DOCK_Y), r = px(DOCK_X + DOCK_W), b = px(DOCK_Y + DOCK_H);
@@ -1838,6 +1929,7 @@ public class HomeActivity extends Activity {
         sh.animate().cancel();
         sh.setScaleX(1f);
         sh.setScaleY(1f);
+        Motion.settle(dock);
         dock.animate().cancel();
         dock.setAlpha(0f);
         dock.setScaleX(1f);
@@ -1870,6 +1962,7 @@ public class HomeActivity extends Activity {
         morphSheet.setClipToOutline(true);
         morphGrid.animate().alpha(0f).setStartDelay(0).setDuration(150).setInterpolator(Motion.IN).withLayer().start();
         // The dock stays hidden (and so is not drawn) under the shrinking sheet; it fades in at the hand-over.
+        Motion.settle(dock);
         dock.animate().cancel();
         dock.setAlpha(0f);
         dock.setScaleX(1f);
@@ -2582,6 +2675,9 @@ public class HomeActivity extends Activity {
             v.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             v.animate().scaleX(1.04f).scaleY(1.04f).setDuration(420).setInterpolator(Motion.OUT).start();
         }
+        for (View v : new View[]{clock, date, wx, utils, dock}) Motion.settle(v);
+        for (int i = 0; i < utils.getChildCount(); i++) Motion.settle(utils.getChildAt(i));
+        for (int i = 0; i < shelfRow.getChildCount(); i++) Motion.settle(shelfRow.getChildAt(i));
         clock.animate().alpha(0f).translationY(-px(18)).setStartDelay(0).setDuration(220).setInterpolator(Motion.IN).start();
         date.animate().alpha(0f).translationY(-px(12)).setStartDelay(0).setDuration(220).setInterpolator(Motion.IN).start();
         wx.animate().alpha(0f).translationY(-px(10)).setStartDelay(0).setDuration(220).setInterpolator(Motion.IN).start();

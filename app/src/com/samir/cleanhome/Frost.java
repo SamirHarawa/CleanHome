@@ -49,6 +49,24 @@ final class Frost {
         return n == 0 ? 0 : (float) (sum / n);
     }
 
+    /** Mean colour of a screen-space rectangle of the low-res photo. */
+    static int avg(Small s, float x0, float y0, float x1, float y1) {
+        double r = 0, g = 0, b = 0; int n = 0;
+        for (int y = 0; y < s.h; y++) {
+            float Y = s.dy + (y + .5f) * s.f;
+            if (Y < y0 || Y > y1) continue;
+            for (int x = 0; x < s.w; x++) {
+                float X = s.dx + (x + .5f) * s.f;
+                if (X < x0 || X > x1) continue;
+                int i = y * s.w + x;
+                r += s.r[i]; g += s.g[i]; b += s.b[i];
+                n++;
+            }
+        }
+        if (n == 0) return android.graphics.Color.rgb(12, 10, 8);
+        return android.graphics.Color.rgb((int) (r / n), (int) (g / n), (int) (b / n));
+    }
+
     static float smooth(float e0, float e1, float x) {
         float t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
         return t * t * (3 - 2 * t);
