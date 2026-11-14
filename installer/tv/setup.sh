@@ -12,6 +12,9 @@ say() { echo "  $*"; }
 
 # 1. Permission CleanHome uses to keep its Home button helper switched on.
 pm grant $PKG android.permission.WRITE_SECURE_SETTINGS 2>/dev/null && say "Permission granted"
+# Approximate location for the weather: the TV's own position (Google's Wi-Fi positioning) is far closer
+# than one guessed from the internet connection. Coarse only; it never leaves the TV more precise than ~1 km.
+pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null && say "Location for the weather allowed"
 
 # 2. Switch on the Home button helper (an accessibility service), keeping any others already on.
 cur=$(settings get secure enabled_accessibility_services)

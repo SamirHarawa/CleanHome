@@ -49,6 +49,39 @@ final class Frost {
         return n == 0 ? 0 : (float) (sum / n);
     }
 
+    /**
+     * How hard it is to read white text over a screen-space rectangle: {brightest tenth's luminance, spread}.
+     * The mean alone misses the hard cases: a dark photo with a bright streak, or a busy, high-contrast
+     * pattern (foliage, fabric, a crowd) that breaks letters up even when it isn't bright on average.
+     */
+    static float[] legibility(Small s, float x0, float y0, float x1, float y1) {
+        float[] v = new float[s.w * s.h];
+        int n = 0;
+        double sum = 0, sq = 0;
+        for (int y = 0; y < s.h; y++) {
+            float Y = s.dy + (y + .5f) * s.f;
+            if (Y < y0 || Y > y1) continue;
+            for (int x = 0; x < s.w; x++) {
+                float X = s.dx + (x + .5f) * s.f;
+                if (X < x0 || X > x1) continue;
+                int i = y * s.w + x;
+                float l = (.2126f * s.r[i] + .7152f * s.g[i] + .0722f * s.b[i]) / 255f;
+                v[n++] = l;
+                sum += l;
+                sq += l * l;
+            }
+        }
+        if (n == 0) return new float[]{0, 0};
+        java.util.Arrays.sort(v, 0, n);
+        double mean = sum / n;
+        return new float[]{v[Math.min(n - 1, (int) (n * .9f))], (float) Math.sqrt(Math.max(0, sq / n - mean * mean))};
+    }
+
+    /** 0 (white text reads perfectly) to 1 (needs all the help it can get), from legibility(). */
+    static float need(float[] lg) {
+        return Math.min(1f, .85f * smooth(.42f, .85f, lg[0]) + .5f * smooth(.07f, .22f, lg[1]));
+    }
+
     /** Mean colour of a screen-space rectangle of the low-res photo. */
     static int avg(Small s, float x0, float y0, float x1, float y1) {
         double r = 0, g = 0, b = 0; int n = 0;

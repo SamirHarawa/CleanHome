@@ -22,7 +22,8 @@ All done with `adb` from your computer; everything is recorded in `/sdcard/Clean
 uninstaller.
 
 1. Installs `CleanHome.apk`.
-2. Grants `WRITE_SECURE_SETTINGS` so CleanHome can switch its Home button helper back on if the TV turns it off.
+2. Grants `WRITE_SECURE_SETTINGS` so CleanHome can switch its Home button helper back on if the TV turns it off,
+   and `ACCESS_COARSE_LOCATION` so the weather uses the TV's own approximate location.
 3. Turns on the Home button helper (accessibility service), keeping any others you had on.
 4. Sets CleanHome as the default home app (`cmd role add-role-holder android.app.role.HOME`).
 5. **TCL only:** TCL's firmware blocks third-party apps from starting at power-on unless they are on an allow-list
@@ -53,11 +54,13 @@ CleanHome has no analytics, ads or accounts. It contacts only:
 | `clients3.google.com` (Chromecast backdrop list) and `*.googleusercontent.com` (the photos) | Google ambient wallpapers | Nothing personal |
 | `www.gstatic.com` (artwork list) and `*.ggpht.com` (the artworks) | Google Arts & Culture wallpapers | Nothing personal |
 | `www.bing.com` | Photo of the day | Nothing personal |
-| `ipwho.is` (fallback `ipapi.co`) | Approximate location for the weather, once a day | Your public IP address, as with any website |
-| `api.open-meteo.com` | The forecast, every 30 minutes | The approximate latitude/longitude |
+| `ipwho.is` (fallback `ipapi.co`) | Approximate location for the weather, once a day, only when the TV's own location isn't available | Your public IP address, as with any website |
+| `api.open-meteo.com` | The forecast, every 30 minutes | The latitude/longitude rounded to about 1 km |
 
 ## Permissions
 
-`INTERNET`, `ACCESS_NETWORK_STATE` (network icon), `QUERY_ALL_PACKAGES` (to list your apps), `WRITE_SECURE_SETTINGS`
+`INTERNET`, `ACCESS_NETWORK_STATE` (network icon), `ACCESS_COARSE_LOCATION` (the weather's location: the TV's own
+approximate position, read from what the TV already knows, rounded to about 1 km, and turned into a town name by the TV's
+own geocoder), `QUERY_ALL_PACKAGES` (to list your apps), `WRITE_SECURE_SETTINGS`
 (granted by the installer, see above). The accessibility service can see window changes and remote keys; it uses them
 only for the Home, Settings, YouTube and Back behaviour described above and doesn't store or send anything.

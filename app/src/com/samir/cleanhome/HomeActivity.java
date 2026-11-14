@@ -172,7 +172,7 @@ public class HomeActivity extends Activity {
         if (wxFetching || !Weather.due(prefs)) return;
         wxFetching = true;
         new Thread(() -> {
-            Weather.Now n = Weather.fetch(prefs);
+            Weather.Now n = Weather.fetch(getApplicationContext(), prefs);
             h.post(() -> { wxFetching = false; if (n != null) showWeather(n, true); });
         }).start();
     }
@@ -239,6 +239,9 @@ public class HomeActivity extends Activity {
         wx.setOrientation(LinearLayout.VERTICAL);
         LinearLayout wxTop = new LinearLayout(this);
         wxTop.setOrientation(LinearLayout.HORIZONTAL);
+        // The text's soft halo spreads past each line; clipped, it showed as dark boxes behind the words.
+        wx.setClipChildren(false);
+        wxTop.setClipChildren(false);
         wxTop.setGravity(Gravity.CENTER_VERTICAL);
         wxIcon = new ImageView(this);
         wxTop.addView(wxIcon, new LinearLayout.LayoutParams(px(52), px(52)));
@@ -429,6 +432,9 @@ public class HomeActivity extends Activity {
             return;
         }
         if (intent.hasExtra("setDock")) { applyDockExtra(intent); return; }
+        /* Test switch: shows a wallpaper for a moment without choosing it (the next 15 s tick goes back).
+           adb shell am start -n com.samir.cleanhome/.HomeActivity --es previewWall night */
+        if (intent.hasExtra("previewWall")) { previewUntil = System.currentTimeMillis() + 14000; showWall(intent.getStringExtra("previewWall"), false); return; }
         if (intent.hasExtra("forceAuto")) { forceAuto = intent.getBooleanExtra("forceAuto", false); buildDock(); showApps(); return; }
         if (overlay.getVisibility() == View.VISIBLE) dismissOverlay(true);
         else focusDock(lastDockFocus);
@@ -841,6 +847,8 @@ public class HomeActivity extends Activity {
         String id;
         Bitmap bg, mat, sheet;
         float veil, sheetExtra;
+        /** How much the clock and weather need help on this photo (0..1). */
+        float ink;
         /** The glass's tint: the photo's own colour around the dock, deepened (rgb only). */
         int tint = Color.rgb(12, 10, 8);
     }
@@ -850,7 +858,12 @@ public class HomeActivity extends Activity {
     String currentWall;
     volatile int gen = 0;
 
-    void applyWallpaper(boolean instant) { showWall(wantedWall(), instant); }
+    long previewUntil;
+
+    void applyWallpaper(boolean instant) {
+        if (System.currentTimeMillis() < previewUntil) return;
+        showWall(wantedWall(), instant);
+    }
 
     void showWall(String id, boolean instant) {
         if (id.equals(currentWall)) return;
@@ -865,21 +878,30 @@ public class HomeActivity extends Activity {
             Look L = new Look();
             L.id = id;
             Frost.Small sm = Frost.small(w, SW, SH);
-            // Adaptive contrast: where the photo is bright behind the clock or the icons, a soft dim
-            // is baked in under them, scaled to how bright it is. Dark photos are left untouched.
-            float lumTL = Frost.lum(sm, px(100), px(40), px(760), px(340));
-            float lumTR = Frost.lum(sm, px(1380), px(50), px(1860), px(200));
+            // Adaptive contrast. Each wallpaper is read where the clock, date, weather and top icons sit: how bright
+            // its brightest parts are there and how busy it is. A soft shade is baked in under them and the text's
+            // halo deepens to match, so they read on anything; calm, dark photos are left untouched.
+            float nClock = Frost.need(Frost.legibility(sm, px(136), px(52), px(450), px(156)));
+            float nDate = Frost.need(Frost.legibility(sm, px(145), px(158), px(460), px(198)));
+            float nWx = Frost.need(Frost.legibility(sm, px(146), px(252), px(520), px(345)));
+            float nIcons = Frost.need(Frost.legibility(sm, px(1330), px(66), px(1790), px(150)));
+            float nText = Math.max(.8f * nClock, Math.max(nDate, nWx));
+            L.ink = nText;
             Frost.Dim[] dims = {
-                    new Frost.Dim(330, 170, 680, 360, .42f * Frost.smooth(.40f, .85f, lumTL)),
-                    new Frost.Dim(1650, 112, 470, 230, .40f * Frost.smooth(.40f, .85f, lumTR))};
+                    new Frost.Dim(330, 200, 720, 400, .46f * nText),
+                    new Frost.Dim(320, 300, 380, 120, .22f * nWx), // the small weather lines get a little more
+                    new Frost.Dim(1650, 112, 470, 230, .42f * nIcons)};
             L.bg = Frost.compose(w, SW, SH, s, dims);
             if (my != gen) return;
             Frost.Small matBlur = Frost.blurred(sm, MAT_BLUR * s);
             float lumMat = Frost.lum(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_X + DOCK_W), px(DOCK_Y + DOCK_H));
             // The dock's cards are solid banners, readable on any glass, so the glass stays light: a faint tint,
             // a little deeper only over very bright photos so white banners still stand apart.
-            L.veil = DOCK_VEIL + .18f * Frost.smooth(.55f, .90f, lumMat);
-            L.tint = glassTint(Frost.avg(matBlur, px(DOCK_X), px(DOCK_Y - 200), px(DOCK_X + DOCK_W), px(DOCK_Y + DOCK_H)));
+            // Over a very dark photo the glass lifts instead, a faint frosted light, so the dock still stands apart.
+            int around = Frost.avg(matBlur, px(DOCK_X), px(DOCK_Y - 200), px(DOCK_X + DOCK_W), px(DOCK_Y + DOCK_H));
+            float dark = 1 - Frost.smooth(.08f, .30f, lumMat);
+            L.veil = DOCK_VEIL + .18f * Frost.smooth(.55f, .90f, lumMat) + .05f * dark;
+            L.tint = blend(glassTint(around), frostTint(around), dark);
             L.mat = Frost.region(matBlur, px(DOCK_X), px(DOCK_Y), px(DOCK_W), px(DOCK_H), s, false);
             h.post(() -> { remember(L); if (id.equals(currentWall)) present(L, instant); });
             // The glass behind panels is only needed later; make it after the photo is up.
@@ -900,6 +922,46 @@ public class HomeActivity extends Activity {
         hsv[1] = Math.min(.55f, hsv[1] * 1.25f);
         hsv[2] = .22f;
         return Color.HSVToColor(hsv);
+    }
+
+    /** The light version for dark photos: the photo's hue, barely saturated, near white. */
+    static int frostTint(int avg) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(avg, hsv);
+        hsv[1] = Math.min(.18f, hsv[1]);
+        hsv[2] = .92f;
+        return Color.HSVToColor(hsv);
+    }
+
+    static int blend(int a, int b, float t) {
+        return Color.rgb(Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * t),
+                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * t),
+                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
+    }
+
+    /** How much help the text is getting now (0 calm photo .. 1 bright or busy), and its halo for that. */
+    float inkNow = -1;
+    ValueAnimator inkAnim;
+
+    void ink(float k) {
+        inkNow = k;
+        clock.setShadowLayer(px(6 + 10 * k), 0, px(1 + k), Color.argb(Math.round(255 * (.25f + .30f * k)), 0, 0, 0));
+        date.setShadowLayer(px(4 + 8 * k), 0, px(1), Color.argb(Math.round(255 * (.30f + .35f * k)), 0, 0, 0));
+        wxTemp.setShadowLayer(px(5 + 8 * k), 0, px(1), Color.argb(Math.round(255 * (.30f + .40f * k)), 0, 0, 0));
+        int halo = Color.argb(Math.round(255 * (.70f + .22f * k)), 0, 0, 0);
+        wxCity.setShadowLayer(px(9 + 4 * k), 0, px(1), halo);
+        wxText.setShadowLayer(px(9 + 4 * k), 0, px(1), halo);
+    }
+
+    /** Eases the halo to a new photo's level alongside its crossfade. */
+    void inkTo(float k, boolean instant) {
+        if (inkAnim != null) inkAnim.cancel();
+        if (instant || inkNow < 0 || Math.abs(k - inkNow) < .02f) { ink(k); return; }
+        inkAnim = ValueAnimator.ofFloat(inkNow, k);
+        inkAnim.setDuration(1200);
+        inkAnim.setInterpolator(Motion.INOUT);
+        inkAnim.addUpdateListener(a -> ink((Float) a.getAnimatedValue()));
+        inkAnim.start();
     }
 
     /** Keeps the two most recent looks (the current one always stays). */
@@ -934,6 +996,7 @@ public class HomeActivity extends Activity {
     /** Crossfades the photo and the dock glass together. */
     void present(Look L, boolean instant) {
         current = L;
+        inkTo(L.ink, instant || bgA.getDrawable() == null);
         int veilTo = (Math.round(L.veil * 255) << 24) | (L.tint & 0xFFFFFF);
         if (instant || bgA.getDrawable() == null) matVeil.setBackgroundColor(veilTo);
         else {

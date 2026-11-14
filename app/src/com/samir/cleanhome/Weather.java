@@ -10,8 +10,8 @@ import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 
 /**
- * Current weather for the Home screen. Location comes from the internet connection (the TV has no GPS
- * and no Wi-Fi fix), refreshed daily; weather comes from Open-Meteo (free, no account), refreshed every
+ * Current weather for the Home screen. Location is the TV's own (Google's Wi-Fi positioning) when the
+ * installer has allowed CleanHome to read it, otherwise the internet connection's, refreshed daily; weather comes from Open-Meteo (free, no account), refreshed every
  * 30 minutes. Everything is cached so the widget shows instantly after a restart, even offline.
  */
 final class Weather {
@@ -38,14 +38,30 @@ final class Weather {
         return System.currentTimeMillis() - n.at > 6 * 3600_000L ? null : n;
     }
 
-    static boolean due(SharedPreferences p) { return System.currentTimeMillis() - p.getLong("wx_tried", 0) > WX_EVERY; }
+    static boolean due(SharedPreferences p) {
+        long since = System.currentTimeMillis() - p.getLong("wx_tried", 0);
+        // Still on the connection's location: try again soon in case the TV's own location has become available.
+        return since > WX_EVERY || (!"device".equals(p.getString("loc_src", "")) && since > 120_000);
+    }
 
     /** Blocking: refresh location if stale, then the weather. Returns the new reading or null. Call off the UI thread. */
-    static Now fetch(SharedPreferences p) {
+    static Now fetch(android.content.Context ctx, SharedPreferences p) {
         p.edit().putLong("wx_tried", System.currentTimeMillis()).apply();
         try {
             long now = System.currentTimeMillis();
-            if (now - p.getLong("loc_at", 0) > LOC_EVERY || !p.contains("loc_lat")) {
+            // The TV's own location (Google's Wi-Fi positioning, when the installer has allowed it) is far more
+            // precise than one from the internet connection, which is often the provider's office in another city.
+            android.location.Location dev = deviceLocation(ctx);
+            boolean moved = dev != null && (!"device".equals(p.getString("loc_src", ""))
+                    || distanceKm(dev.getLatitude(), dev.getLongitude(), p.getFloat("loc_lat", 0), p.getFloat("loc_lon", 0)) > 3);
+            if (dev != null && (moved || now - p.getLong("loc_at", 0) > LOC_EVERY)) {
+                // Rounded to about a kilometre: plenty for weather, and no more precise than it needs to be.
+                double lat = Math.round(dev.getLatitude() * 100) / 100.0, lon = Math.round(dev.getLongitude() * 100) / 100.0;
+                String city = placeName(ctx, dev.getLatitude(), dev.getLongitude());
+                if (city == null) city = moved ? "" : p.getString("wx_city", "");
+                p.edit().putFloat("loc_lat", (float) lat).putFloat("loc_lon", (float) lon).putString("wx_city", city)
+                        .putString("loc_src", "device").putLong("loc_at", now).putLong("wx_at", 0).apply();
+            } else if (dev == null && (now - p.getLong("loc_at", 0) > LOC_EVERY || !p.contains("loc_lat"))) {
                 double[] ll = null; String city = null;
                 try {
                     org.json.JSONObject j = new org.json.JSONObject(get("https://ipwho.is/"));
@@ -58,7 +74,7 @@ final class Weather {
                     } catch (Exception ignored) { }
                 }
                 if (ll != null) p.edit().putFloat("loc_lat", (float) ll[0]).putFloat("loc_lon", (float) ll[1])
-                        .putString("wx_city", city == null ? "" : city).putLong("loc_at", now).apply();
+                        .putString("wx_city", city == null ? "" : city).putString("loc_src", "ip").putLong("loc_at", now).apply();
             }
             if (!p.contains("loc_lat")) return null;
             String url = "https://api.open-meteo.com/v1/forecast?latitude=" + p.getFloat("loc_lat", 0) + "&longitude=" + p.getFloat("loc_lon", 0)
@@ -77,6 +93,44 @@ final class Weather {
                     .putBoolean("wx_day", n.day).putLong("wx_at", n.at).apply();
             return n;
         } catch (Exception e) { return null; }
+    }
+
+    /** The newest location the TV already knows (no new fix is requested), if CleanHome may read it. */
+    static android.location.Location deviceLocation(android.content.Context ctx) {
+        if (ctx.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            return null;
+        try {
+            android.location.LocationManager lm = (android.location.LocationManager) ctx.getSystemService(android.content.Context.LOCATION_SERVICE);
+            android.location.Location best = null;
+            for (String pr : lm.getAllProviders()) {
+                android.location.Location l = lm.getLastKnownLocation(pr);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            }
+            // A fix from long ago (the TV moved house since) isn't trusted over the connection's location.
+            if (best == null || System.currentTimeMillis() - best.getTime() > 14 * 24 * 3600_000L) return null;
+            return best;
+        } catch (Exception e) { return null; }
+    }
+
+    /** The town or city at a point, from the TV's own geocoder; null if it has none. */
+    @SuppressWarnings("deprecation")
+    static String placeName(android.content.Context ctx, double lat, double lon) {
+        try {
+            if (!android.location.Geocoder.isPresent()) return null;
+            java.util.List<android.location.Address> a = new android.location.Geocoder(ctx, java.util.Locale.getDefault()).getFromLocation(lat, lon, 1);
+            if (a == null || a.isEmpty()) return null;
+            android.location.Address ad = a.get(0);
+            String c = ad.getLocality();
+            if (c == null || c.isEmpty()) c = ad.getSubAdminArea();
+            if (c == null || c.isEmpty()) c = ad.getAdminArea();
+            return c;
+        } catch (Exception e) { return null; }
+    }
+
+    static double distanceKm(double a1, double o1, double a2, double o2) {
+        double r = Math.PI / 180, dl = (a2 - a1) * r, dn = (o2 - o1) * r;
+        double h = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a1 * r) * Math.cos(a2 * r) * Math.sin(dn / 2) * Math.sin(dn / 2);
+        return 12742 * Math.asin(Math.sqrt(h));
     }
 
     static String get(String url) throws Exception { return get(url, null); }
