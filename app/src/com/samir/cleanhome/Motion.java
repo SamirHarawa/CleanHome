@@ -98,6 +98,9 @@ final class Motion {
         @Override public void onAnimationStart(android.animation.Animator a) {
             // A cached layer while it fades: drawn once, not re-blended every frame. Set, not built here:
             // the render thread builds it with the next frame instead of the main thread stalling for it.
+            // Not for a tile whose card can grow past its bounds (a focused card): a layer is cut to the
+            // tile's rectangle, which squares off the card's rounded corners and hides its shadow.
+            if (v instanceof ViewGroup && !((ViewGroup) v).getClipChildren()) return;
             v.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
         @Override public void onAnimationEnd(android.animation.Animator a) { done(a); }

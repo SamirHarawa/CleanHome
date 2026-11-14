@@ -344,9 +344,16 @@ public class HomeActivity extends Activity {
         hideBars();
         sounds.refresh();
         boolean back = returning != null;
-        loadApps();
-        buildDock();
-        prewarmCards();
+        if (dockReady) {
+            loadApps();
+            buildDock();
+            prewarmCards();
+        } else {
+            // First start (at power-on the TV is busy and this is slow): show the wallpaper, clock and the dock's
+            // glass first, then fill the dock right after that first frame; its cards rise in as usual.
+            dockReady = true;
+            android.view.Choreographer.getInstance().postFrameCallback(t -> h.post(this::firstDock));
+        }
         fetchDaily(false);
         liveTick(false);
         refreshAvatar();
@@ -451,8 +458,12 @@ public class HomeActivity extends Activity {
             Motion.rise(utils.getChildAt(i), px(10), delay + (long) ((120 + 40 * i) * stretch), (long) (520 * stretch));
         Motion.rise(dock, px(36), delay + (long) (60 * stretch), (long) (680 * stretch));
         h.post(() -> {
-            for (int i = 0; i < shelfRow.getChildCount(); i++)
-                Motion.rise(shelfRow.getChildAt(i), px(16), delay + (long) ((160 + 45 * i) * stretch), (long) (560 * stretch));
+            for (int i = 0; i < shelfRow.getChildCount(); i++) {
+                View c = shelfRow.getChildAt(i);
+                if (c == arriving) continue; // the app's own card has its fold-back arrival
+                Motion.rise(c, px(16), delay + (long) ((160 + 45 * i) * stretch), (long) (560 * stretch));
+            }
+            arriving = null;
         });
     }
 
@@ -1109,9 +1120,12 @@ public class HomeActivity extends Activity {
      * Back from an app: the app's dock card shrinks down from a little larger and fades in, as if the app
      * folded back into it; the clock and buttons settle in with it. Apps not on the dock just get the settle.
      */
+    View arriving;
+
     void arrive(String pkg) {
         int i = dockList().indexOf(pkg);
         View card = i >= 0 && i < shelfRow.getChildCount() ? shelfRow.getChildAt(i) : null;
+        arriving = card;
         if (card != null) {
             // Driven frame by frame on the main thread and always finished at exactly 1: a property animation
             // started while Home is still hidden behind the app's exit transition can lose its scale part.
@@ -1155,6 +1169,17 @@ public class HomeActivity extends Activity {
         void rest() { v.setScaleX(1f); v.setScaleY(1f); v.setAlpha(1f); v.setTranslationX(0f); v.setTranslationY(0f); }
         @Override public void onAnimationEnd(android.animation.Animator a) { rest(); }
         @Override public void onAnimationCancel(android.animation.Animator a) { rest(); }
+    }
+
+    boolean dockReady;
+
+    void firstDock() {
+        loadApps();
+        buildDock();
+        prewarmCards();
+        for (int i = 0; i < shelfRow.getChildCount(); i++)
+            Motion.rise(shelfRow.getChildAt(i), px(16), 40 + 45L * i, 560);
+        if (overlay.getVisibility() != View.VISIBLE) focusDock(lastDockFocus);
     }
 
     void focusDock(int i) {
@@ -1909,7 +1934,9 @@ public class HomeActivity extends Activity {
         MorphOutline mo = (MorphOutline) morphSheet.getOutlineProvider();
         float l = px(DOCK_X), t = px(DOCK_Y), r = px(DOCK_X + DOCK_W), b = px(DOCK_Y + DOCK_H);
         mo.r.set(l * (1 - p), t * (1 - p), r + (SW - r) * p, b + (SH - b) * p);
-        mo.radius = px(DOCK_R) * (1 - p);
+        // Rounded like the dock while it grows; the corners only square off over the last stretch, as the
+        // sheet meets the screen's edges.
+        mo.radius = px(DOCK_R) * (1 - Frost.smooth(.72f, 1f, p));
         morphSheet.invalidateOutline();
     }
 

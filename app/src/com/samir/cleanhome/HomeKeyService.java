@@ -17,13 +17,42 @@ public class HomeKeyService extends AccessibilityService {
 
     String lastWindow = "";
 
+    /**
+     * At power-on this service's process starts while Google TV's home is still loading, about a second
+     * before the system finishes connecting the service. Opening CleanHome right here gets it in front
+     * before Google TV's home has drawn at all. Only in the first two minutes after boot, when nothing else
+     * can be on screen yet; later (the service switched back on, an update) it waits to connect as usual.
+     */
+    @Override public void onCreate() {
+        super.onCreate();
+        if (android.os.SystemClock.elapsedRealtime() < 120_000 && HomeActivity.live == null) {
+            try { goHome(); } catch (Exception ignored) { }
+        }
+    }
+
     @Override protected void onServiceConnected() {
         instance = this;
         // Connected while Google TV home is already showing (after an update or at boot): leave it.
         // At boot this service can connect before Google TV has drawn its home, and the window event for it
         // may come before we are listening, so keep looking for a while rather than checking once.
         bootChecks = 0;
+        // Just after power-on, Google TV's home is still starting up (it takes ~1.5 s to draw). Switching
+        // now puts CleanHome in front before it ever shows, instead of waiting to see it first.
+        if (android.os.SystemClock.elapsedRealtime() < 180_000 && bootScreen()) {
+            lastWindow = "home.HomeActivity";
+            goHome();
+        }
         h.post(bootCheck);
+    }
+
+    /** At start-up: nothing on screen yet, or only Google TV home / the system's placeholder home. */
+    boolean bootScreen() {
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return true;
+            String pkg = String.valueOf(root.getPackageName());
+            return GTV.equals(pkg) || "com.android.tv.settings".equals(pkg);
+        } catch (Exception e) { return false; }
     }
 
     int bootChecks;
