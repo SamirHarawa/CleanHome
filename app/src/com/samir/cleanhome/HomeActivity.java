@@ -1102,11 +1102,14 @@ public class HomeActivity extends Activity {
         matB.setVisibility(View.INVISIBLE);
         dock.addView(matA, new FrameLayout.LayoutParams(MATCH, MATCH));
         dock.addView(matB, new FrameLayout.LayoutParams(MATCH, MATCH));
+        // Deep glass: the photo bends round the rim and reads a little richer through it.
+        Glass.lens(matA, px(DOCK_R), px(30), 1.22f);
+        Glass.lens(matB, px(DOCK_R), px(30), 1.22f);
         matVeil = new View(this);
         matVeil.setBackgroundColor(Color.argb(Math.round(DOCK_VEIL * 255), 12, 10, 8));
         dock.addView(matVeil, new FrameLayout.LayoutParams(MATCH, MATCH));
         View edge = new View(this);
-        edge.setBackground(new PlateDrawable(0, 0, 0, .24f, px(DOCK_R)));
+        edge.setBackground(new Glass.Rim(px(DOCK_R), .62f, true));
         dock.addView(edge, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         shelf = new HorizontalScrollView(this);
@@ -1453,7 +1456,11 @@ public class HomeActivity extends Activity {
             if (edge > 0) {
                 line.setStyle(Paint.Style.STROKE);
                 line.setStrokeWidth(1.5f);
-                line.setShader(new LinearGradient(0, b.top, 0, b.top + r(), Color.argb((int) (edge * 255), 255, 255, 255), 0x00FFFFFF, Shader.TileMode.CLAMP));
+                // Light catches the rim round the top left, and more softly at the bottom right.
+                line.setShader(new android.graphics.SweepGradient(b.centerX(), b.centerY(),
+                        new int[]{Glass.Rim.white(.18f * edge), Glass.Rim.white(.45f * edge), Glass.Rim.white(.12f * edge),
+                                Glass.Rim.white(.28f * edge), Glass.Rim.white(1f * edge), Glass.Rim.white(.70f * edge), Glass.Rim.white(.18f * edge)},
+                        new float[]{0f, .13f, .30f, .48f, .62f, .78f, 1f}));
             }
         }
         float r() { return Math.min(r, b.height() / 2f); }
@@ -1631,6 +1638,7 @@ public class HomeActivity extends Activity {
             bg.setImageBitmap(current.bg);
             if (Build.VERSION.SDK_INT >= 31) bg.setRenderEffect(RenderEffect.createBlurEffect(px(SHEET_BLUR), px(SHEET_BLUR), Shader.TileMode.CLAMP));
         }
+        bg.setColorFilter(Glass.vibrancy(1.2f)); // colours read richer through the glass
         if (right) bg.setTranslationX(-(SW - widthPx));
         sh.addView(bg, new FrameLayout.LayoutParams(SW, SH));
         View v = new View(this);
@@ -2212,6 +2220,11 @@ public class HomeActivity extends Activity {
         FrameLayout sh = sheet(.46f, w, true);
         sh.setOutlineProvider(ViewOutlineProvider.BOUNDS);
         sh.setClipToOutline(true);
+        // The panel's leading edge catches the light, like the rim of a pane of glass.
+        View rim = new View(this);
+        rim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x8CFFFFFF, 0x30FFFFFF, 0x1AFFFFFF, 0x40FFFFFF}));
+        sh.addView(rim, new FrameLayout.LayoutParams(2, MATCH, Gravity.START));
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -2469,11 +2482,20 @@ public class HomeActivity extends Activity {
         java.io.File f = new java.io.File(getFilesDir(), "avatar.png");
         Bitmap b = f.exists() ? BitmapFactory.decodeFile(f.getPath()) : null;
         if (b == null) return;
-        accountIcon.setImageBitmap(b);
+        // A fine light ring, as Google draws it: it reads as a profile picture even when the photo is dark.
+        Bitmap ringed = b.copy(Bitmap.Config.ARGB_8888, true);
+        android.graphics.Canvas cv = new android.graphics.Canvas(ringed);
+        Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        ring.setStyle(Paint.Style.STROKE);
+        float w = ringed.getWidth() * .045f;
+        ring.setStrokeWidth(w);
+        ring.setColor(0xE6F6F1E7);
+        cv.drawCircle(ringed.getWidth() / 2f, ringed.getHeight() / 2f, ringed.getWidth() / 2f - w / 2 - 1, ring);
+        accountIcon.setImageBitmap(ringed);
         accountIcon.setTag(Boolean.TRUE);
         if (!accountIcon.hasFocus() && !((View) accountIcon.getParent()).hasFocus()) accountIcon.setAlpha(.92f);
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) accountIcon.getLayoutParams();
-        lp.width = px(40); lp.height = px(40);
+        lp.width = px(44); lp.height = px(44);
         accountIcon.setLayoutParams(lp);
     }
 

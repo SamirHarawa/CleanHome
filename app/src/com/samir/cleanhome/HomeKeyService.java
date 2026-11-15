@@ -204,23 +204,59 @@ public class HomeKeyService extends AccessibilityService {
 
     void captureAvatar() {
         if (android.os.Build.VERSION.SDK_INT < 30 || dreamTries >= 0) return;
-        if (avatarAt != 0 && android.os.SystemClock.uptimeMillis() - avatarAt < 600_000) return;
         android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null || !GTV.contentEquals(String.valueOf(root.getPackageName()))) return;
+        java.io.File hi = new java.io.File(getFilesDir(), "avatar.hi");
+        if (lastWindow.contains("ProfileChooser")) {
+            // Google's account chooser shows the picture at 220 px, four times the panel's: the sharp source.
+            android.graphics.Rect r = chooserAvatar(root);
+            if (r != null) takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(), new Shot(this, r, .06f, true));
+            return;
+        }
+        // The quick-settings panel's small copy: only until the chooser has given a sharp one (kept a month).
+        if (hi.exists() && System.currentTimeMillis() - hi.lastModified() < 30L * 24 * 3600_000L) return;
+        if (avatarAt != 0 && android.os.SystemClock.uptimeMillis() - avatarAt < 600_000) return;
         for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText("profile selector")) {
             if (n.isFocused()) return; // its focus ring would be in the picture; try another time
             android.graphics.Rect r = new android.graphics.Rect();
             n.getBoundsInScreen(r);
             if (r.width() < 24 || r.height() < 24) return;
             avatarAt = android.os.SystemClock.uptimeMillis();
-            takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(), new Shot(this, r));
+            takeScreenshot(android.view.Display.DEFAULT_DISPLAY, getMainExecutor(), new Shot(this, r, .09f, false));
             return;
         }
     }
 
+    /**
+     * The first account's picture on the chooser. The picture itself is hidden from accessibility (an unlabelled
+     * image), but its tile in the accounts row isn't: the picture is the square at the top of the tile.
+     */
+    static android.graphics.Rect chooserAvatar(android.view.accessibility.AccessibilityNodeInfo root) {
+        java.util.ArrayList<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayList<>();
+        q.add(root);
+        android.graphics.Rect best = null;
+        for (int i = 0; i < q.size() && i < 400; i++) {
+            android.view.accessibility.AccessibilityNodeInfo n = q.get(i);
+            if (n == null) continue;
+            boolean grid = String.valueOf(n.getClassName()).endsWith("GridView");
+            for (int c = 0; c < n.getChildCount(); c++) {
+                android.view.accessibility.AccessibilityNodeInfo k = n.getChild(c);
+                if (k == null) continue;
+                if (!grid) { q.add(k); continue; }
+                if (!k.findAccessibilityNodeInfosByText("Add account").isEmpty()) continue;
+                android.graphics.Rect r = new android.graphics.Rect();
+                k.getBoundsInScreen(r);
+                if (r.width() < 120 || r.height() < r.width()) continue;
+                r.bottom = r.top + r.width();
+                if (best == null || r.left < best.left) best = r;
+            }
+        }
+        return best;
+    }
+
     static final class Shot implements TakeScreenshotCallback {
-        final HomeKeyService s; final android.graphics.Rect r;
-        Shot(HomeKeyService s, android.graphics.Rect r) { this.s = s; this.r = r; }
+        final HomeKeyService s; final android.graphics.Rect r; final float edge; final boolean sharp;
+        Shot(HomeKeyService s, android.graphics.Rect r, float edge, boolean sharp) { this.s = s; this.r = r; this.edge = edge; this.sharp = sharp; }
         @Override public void onSuccess(ScreenshotResult res) {
             try {
                 android.graphics.Bitmap hw = android.graphics.Bitmap.wrapHardwareBuffer(res.getHardwareBuffer(), res.getColorSpace());
@@ -228,10 +264,10 @@ public class HomeKeyService extends AccessibilityService {
                 if (hw == null) return;
                 android.graphics.Bitmap full = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false);
                 // Screenshot is in real pixels; node bounds are too.
-                int inset = Math.max(2, Math.round(r.width() * .09f));
+                int inset = Math.max(2, Math.round(r.width() * edge)); // clear of Google's ring or focus outline
                 android.graphics.Rect c = new android.graphics.Rect(r.left + inset, r.top + inset, r.right - inset, r.bottom - inset);
                 if (c.right > full.getWidth() || c.bottom > full.getHeight()) return;
-                int size = 128;
+                int size = sharp ? 192 : 128;
                 android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
                 android.graphics.Canvas cv = new android.graphics.Canvas(out);
                 android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG | android.graphics.Paint.FILTER_BITMAP_FLAG);
@@ -241,6 +277,8 @@ public class HomeKeyService extends AccessibilityService {
                 java.io.File tmp = new java.io.File(s.getFilesDir(), "avatar.tmp");
                 try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) { out.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, o); }
                 tmp.renameTo(new java.io.File(s.getFilesDir(), "avatar.png"));
+                java.io.File hi = new java.io.File(s.getFilesDir(), "avatar.hi");
+                if (sharp) { try { new java.io.FileOutputStream(hi).close(); hi.setLastModified(System.currentTimeMillis()); } catch (Exception ignored) { } }
                 HomeActivity a = HomeActivity.live;
                 if (a != null) a.refreshAvatar();
             } catch (Exception ignored) { }
@@ -320,7 +358,7 @@ public class HomeKeyService extends AccessibilityService {
             CharSequence cls = ev.getClassName();
             lastWindow = cls == null ? "" : cls.toString();
             if (lastWindow.endsWith("home.HomeActivity")) goHome();
-            if (lastWindow.contains(".dashboard.") && dreamTries < 0) {
+            if ((lastWindow.contains(".dashboard.") || lastWindow.contains("ProfileChooser")) && dreamTries < 0) {
                 h.removeCallbacks(captureAvatar);
                 h.postDelayed(captureAvatar, 900);
             }
