@@ -61,7 +61,10 @@ final class Weather {
                 if (city == null) city = moved ? "" : p.getString("wx_city", "");
                 p.edit().putFloat("loc_lat", (float) lat).putFloat("loc_lon", (float) lon).putString("wx_city", city)
                         .putString("loc_src", "device").putLong("loc_at", now).putLong("wx_at", 0).apply();
-            } else if (dev == null && (now - p.getLong("loc_at", 0) > LOC_EVERY || !p.contains("loc_lat"))) {
+            } else if (dev == null && !p.contains("loc_lat")
+                    || dev == null && !"device".equals(p.getString("loc_src", "")) && now - p.getLong("loc_at", 0) > LOC_EVERY) {
+                // Only when there's nothing better: a place the TV itself reported earlier is never swapped for
+                // the connection's guess just because the TV hasn't found itself again yet (e.g. after a restart).
                 double[] ll = null; String city = null;
                 try {
                     org.json.JSONObject j = new org.json.JSONObject(get("https://ipwho.is/"));
@@ -95,7 +98,10 @@ final class Weather {
         } catch (Exception e) { return null; }
     }
 
-    /** The newest location the TV already knows (no new fix is requested), if CleanHome may read it. */
+    /**
+     * Where the TV is, if CleanHome may ask: the newest location it already knows, or else (just after a restart,
+     * when it knows none) a fresh one from Google's Wi-Fi positioning, waiting up to 12 s. Call off the UI thread.
+     */
     static android.location.Location deviceLocation(android.content.Context ctx) {
         if (ctx.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             return null;
@@ -107,9 +113,25 @@ final class Weather {
                 if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
             }
             // A fix from long ago (the TV moved house since) isn't trusted over the connection's location.
-            if (best == null || System.currentTimeMillis() - best.getTime() > 14 * 24 * 3600_000L) return null;
-            return best;
+            if (best != null && System.currentTimeMillis() - best.getTime() <= 14 * 24 * 3600_000L) return best;
+            return freshLocation(lm);
         } catch (Exception e) { return null; }
+    }
+
+    static android.location.Location freshLocation(android.location.LocationManager lm) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null;
+        java.util.List<String> all = lm.getAllProviders();
+        String pr = all.contains("fused") ? "fused" : all.contains(android.location.LocationManager.NETWORK_PROVIDER)
+                ? android.location.LocationManager.NETWORK_PROVIDER : null;
+        if (pr == null || !lm.isProviderEnabled(pr)) return null;
+        final android.location.Location[] got = new android.location.Location[1];
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        android.os.CancellationSignal stop = new android.os.CancellationSignal();
+        try {
+            lm.getCurrentLocation(pr, stop, Runnable::run, l -> { got[0] = l; done.countDown(); });
+            if (!done.await(12, java.util.concurrent.TimeUnit.SECONDS)) stop.cancel();
+        } catch (Exception e) { stop.cancel(); }
+        return got[0];
     }
 
     /** The town or city at a point, from the TV's own geocoder; null if it has none. */
