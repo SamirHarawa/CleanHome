@@ -1668,6 +1668,8 @@ public class HomeActivity extends Activity {
         int mode = block ? ViewGroup.FOCUS_BLOCK_DESCENDANTS : ViewGroup.FOCUS_AFTER_DESCENDANTS;
         utils.setDescendantFocusability(mode);
         dock.setDescendantFocusability(mode);
+        // The weather is selectable too, but it sits outside both, so it has to be switched off on its own.
+        if (wx != null) wx.setFocusable(!block);
     }
 
     /** CleanFrame's sheet: the wallpaper, heavily frosted (cleanly, no grain), under a dark veil. */
@@ -2192,6 +2194,9 @@ public class HomeActivity extends Activity {
             }
             FrameLayout t = appCard(pkg);
             if (d.contains(pkg)) pinHost(t).addView(homeDot());
+            // While it fades in, its alpha must not go through an offscreen layer: on this TV that layer drops
+            // the card's rounded clip, so the cards showed square corners until the fade ended.
+            t.forceHasOverlappingRendering(false);
             t.setOnFocusChangeListener((v, f) -> { cardFocus(v, f); if (f) sv.follow(v); });
             t.setOnClickListener(v -> { launch(pkg, v.findViewWithTag("appcard")); closeOverlay(); });
             t.setOnLongClickListener(v -> { clickSound(); togglePin(pkg); return true; });
