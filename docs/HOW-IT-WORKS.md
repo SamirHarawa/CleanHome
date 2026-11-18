@@ -14,6 +14,7 @@ a third-party home screen to take over, so the installer and the app use a few s
 | `Sounds` | Interface sounds: the TV's own system sounds, the same as the rest of Google TV (navigation sounds when focus moves, the click on OK). Reaching the end of a row is silent; the card nudges instead. The system "sound effects" switch turns them off. |
 | `BannerArt` | Apps grid cards: checks whether an app's banner is a real one, and builds a 16:9 banner (icon above the app's name) when it isn't. |
 | `Weather` | Location and forecast, with the colour weather icons. |
+| `Backup` | Keeps a copy of CleanHome's settings (dock, wallpaper, weather location) and the profile picture in the TV's system settings, so a reinstall starts where you left off. The uninstaller deletes it. |
 | `LiveWall` | Live wallpapers: picks an unseen picture from Google's feeds every hour, on the hour, keeps the next one downloaded and ready. |
 
 ## What the installer changes on the TV
@@ -56,6 +57,7 @@ CleanHome has no analytics, ads or accounts. It contacts only:
 | `www.bing.com` | Photo of the day | Nothing personal |
 | `ipwho.is` (fallback `ipapi.co`) | Approximate location for the weather, once a day, only when the TV's own location isn't available | Your public IP address, as with any website |
 | `api.open-meteo.com` | The forecast, every 30 minutes | The latitude/longitude rounded to about 1 km |
+| `geocoding-api.open-meteo.com` | Only while you type a town in "Weather location" | What you type |
 
 ## Permissions
 

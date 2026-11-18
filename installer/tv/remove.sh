@@ -15,6 +15,9 @@ if [ -z "$new" ] || [ "$new" = "null" ]; then
 else
   settings put secure enabled_accessibility_services "$new"
 fi
+# CleanHome's own backup of its settings and profile picture (kept so a reinstall starts where you left off).
+settings delete secure cleanhome_backup >/dev/null 2>&1
+settings delete secure cleanhome_avatar >/dev/null 2>&1
 say "Home button helper off"
 
 # 2. TCL start-up allow-list back to how it was.

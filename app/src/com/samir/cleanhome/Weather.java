@@ -41,7 +41,9 @@ final class Weather {
     static boolean due(SharedPreferences p) {
         long since = System.currentTimeMillis() - p.getLong("wx_tried", 0);
         // Still on the connection's location: try again soon in case the TV's own location has become available.
-        return since > WX_EVERY || (!"device".equals(p.getString("loc_src", "")) && since > 120_000);
+        String src = p.getString("loc_src", "");
+        if (!p.contains("wx_json") && since > 20_000) return true; // the detailed forecast hasn't been fetched yet
+        return since > WX_EVERY || (!"device".equals(src) && !"manual".equals(src) && since > 120_000);
     }
 
     /** Blocking: refresh location if stale, then the weather. Returns the new reading or null. Call off the UI thread. */
@@ -49,9 +51,11 @@ final class Weather {
         p.edit().putLong("wx_tried", System.currentTimeMillis()).apply();
         try {
             long now = System.currentTimeMillis();
+            // A town you chose yourself is always used as it is.
+            boolean manual = "manual".equals(p.getString("loc_src", ""));
             // The TV's own location (Google's Wi-Fi positioning, when the installer has allowed it) is far more
             // precise than one from the internet connection, which is often the provider's office in another city.
-            android.location.Location dev = deviceLocation(ctx);
+            android.location.Location dev = manual ? null : deviceLocation(ctx);
             boolean moved = dev != null && (!"device".equals(p.getString("loc_src", ""))
                     || distanceKm(dev.getLatitude(), dev.getLongitude(), p.getFloat("loc_lat", 0), p.getFloat("loc_lon", 0)) > 3);
             if (dev != null && (moved || now - p.getLong("loc_at", 0) > LOC_EVERY)) {
@@ -61,6 +65,8 @@ final class Weather {
                 if (city == null) city = moved ? "" : p.getString("wx_city", "");
                 p.edit().putFloat("loc_lat", (float) lat).putFloat("loc_lon", (float) lon).putString("wx_city", city)
                         .putString("loc_src", "device").putLong("loc_at", now).putLong("wx_at", 0).apply();
+            } else if (manual) {
+                // (nothing to look up)
             } else if (dev == null && !p.contains("loc_lat")
                     || dev == null && !"device".equals(p.getString("loc_src", "")) && now - p.getLong("loc_at", 0) > LOC_EVERY) {
                 // Only when there's nothing better: a place the TV itself reported earlier is never swapped for
@@ -81,7 +87,10 @@ final class Weather {
             }
             if (!p.contains("loc_lat")) return null;
             String url = "https://api.open-meteo.com/v1/forecast?latitude=" + p.getFloat("loc_lat", 0) + "&longitude=" + p.getFloat("loc_lon", 0)
-                    + "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1";
+                    + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day"
+                    + "&hourly=temperature_2m,weather_code,is_day,precipitation_probability"
+                    + "&daily=temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,precipitation_probability_max"
+                    + "&timezone=auto&forecast_days=6";
             org.json.JSONObject j = new org.json.JSONObject(get(url));
             org.json.JSONObject c = j.getJSONObject("current"), d = j.getJSONObject("daily");
             Now n = new Now();
@@ -93,7 +102,7 @@ final class Weather {
             n.city = p.getString("wx_city", "");
             n.at = System.currentTimeMillis();
             p.edit().putFloat("wx_temp", n.temp).putFloat("wx_hi", n.hi).putFloat("wx_lo", n.lo).putInt("wx_code", n.code)
-                    .putBoolean("wx_day", n.day).putLong("wx_at", n.at).apply();
+                    .putBoolean("wx_day", n.day).putLong("wx_at", n.at).putString("wx_json", j.toString()).apply();
             return n;
         } catch (Exception e) { return null; }
     }
@@ -180,6 +189,47 @@ final class Weather {
             for (int k; (k = in.read(buf)) > 0; ) b.write(buf, 0, k);
             return b.toString("UTF-8");
         } finally { c.disconnect(); }
+    }
+
+    /** A place from the town search. */
+    static final class Place {
+        String name, area;
+        double lat, lon;
+        String label() { return area == null || area.isEmpty() ? name : name + ", " + area; }
+    }
+
+    /** Towns matching what was typed (Open-Meteo's free place search). Blocking: call off the UI thread. */
+    static java.util.List<Place> search(String q) {
+        java.util.List<Place> out = new java.util.ArrayList<>();
+        if (q == null || q.trim().length() < 2) return out;
+        try {
+            org.json.JSONObject j = new org.json.JSONObject(get("https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&name="
+                    + java.net.URLEncoder.encode(q.trim(), "UTF-8")));
+            org.json.JSONArray a = j.optJSONArray("results");
+            for (int i = 0; a != null && i < a.length(); i++) {
+                org.json.JSONObject r = a.getJSONObject(i);
+                Place pl = new Place();
+                pl.name = r.optString("name");
+                String admin = r.optString("admin1", ""), country = r.optString("country", "");
+                pl.area = admin.isEmpty() || admin.equals(pl.name) ? country : admin + ", " + country;
+                pl.lat = r.getDouble("latitude");
+                pl.lon = r.getDouble("longitude");
+                out.add(pl);
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    /** Uses this town from now on (until "Automatic" is chosen again). */
+    static void useTown(SharedPreferences p, Place pl) {
+        p.edit().putString("loc_src", "manual").putFloat("loc_lat", (float) (Math.round(pl.lat * 100) / 100.0))
+                .putFloat("loc_lon", (float) (Math.round(pl.lon * 100) / 100.0)).putString("wx_city", pl.name)
+                .putLong("loc_at", System.currentTimeMillis()).putLong("wx_tried", 0).apply();
+    }
+
+    /** Back to finding the TV's location by itself. */
+    static void useAutomatic(SharedPreferences p) {
+        p.edit().putString("loc_src", "").putLong("loc_at", 0).putLong("wx_tried", 0).apply();
     }
 
     // ---- WMO weather codes

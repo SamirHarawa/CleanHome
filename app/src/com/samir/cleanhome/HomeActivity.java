@@ -173,7 +173,11 @@ public class HomeActivity extends Activity {
         wxFetching = true;
         new Thread(() -> {
             Weather.Now n = Weather.fetch(getApplicationContext(), prefs);
-            h.post(() -> { wxFetching = false; if (n != null) showWeather(n, true); });
+            h.post(() -> {
+                wxFetching = false;
+                if (n != null) showWeather(n, true);
+                if (n != null && wxCard != null && wx.hasFocus()) openWeatherCard(); // fresh details in the open card
+            });
         }).start();
     }
     Glide dockGlide;
@@ -200,6 +204,9 @@ public class HomeActivity extends Activity {
         SH = getResources().getDisplayMetrics().heightPixels;
         s = SW / 1920f;
         prefs = getSharedPreferences("home", MODE_PRIVATE);
+        // A fresh install (nothing saved yet): bring back the settings from the copy in the TV's system settings.
+        if (Backup.restoreIfFresh(this, prefs)) android.util.Log.i("CleanHomeBackup", "restored settings from backup");
+        prefs.registerOnSharedPreferenceChangeListener(backupOnChange);
         sounds = new Sounds(this);
         liveWall = new LiveWall(getFilesDir(), prefs);
         if (prefs.getInt("dockv", 0) < DOCK_VERSION) {
@@ -283,6 +290,7 @@ public class HomeActivity extends Activity {
         utils.addView(acct);
         refreshAvatar();
         pinEnds(utils);
+        setupWeatherFocus();
         FrameLayout.LayoutParams ulp = new FrameLayout.LayoutParams(WRAP, px(64), Gravity.TOP | Gravity.END);
         ulp.topMargin = px(76);
         ulp.rightMargin = px(132); // the last icon ends where the dock's last card does
@@ -323,8 +331,20 @@ public class HomeActivity extends Activity {
         } catch (Exception ignored) { }
         updateNet();
         animateIn();
+        h.postDelayed(saveBackup, 8000); // a first copy of things as they are now
         if (getIntent() != null && getIntent().getBooleanExtra("quickSettings", false)) h.postDelayed(this::showQuickSettings, 400);
     }
+
+    /** Any settings change is copied to the backup a few seconds later (changes come in bursts). */
+    final SharedPreferences.OnSharedPreferenceChangeListener backupOnChange = (sp, key) -> {
+        h.removeCallbacks(this.saveBackup);
+        h.postDelayed(this.saveBackup, 5000);
+    };
+    final Runnable saveBackup = () -> worker.execute(() -> {
+        Backup.save(getApplicationContext(), prefs);
+        File av = new File(getFilesDir(), "avatar.png");
+        if (av.exists() && Backup.read(this, Backup.AVATAR) == null) Backup.saveAvatar(this, av);
+    });
 
     final android.content.BroadcastReceiver packages = new PackageReceiver(this);
 
@@ -548,6 +568,31 @@ public class HomeActivity extends Activity {
         }
         // Nobody took the key: move focus here rather than leave it to the system, which would play its own beep.
         if (before == null) return false;
+        // Up from the dock: the left of it goes to the weather above it, the rest to the icon above them.
+        if (dir == View.FOCUS_UP && overlay.getVisibility() != View.VISIBLE && isDockTile(before)) {
+            View target = null;
+            int[] b = new int[2];
+            before.getLocationOnScreen(b);
+            float cx = b[0] + before.getWidth() / 2f;
+            if (wx.getVisibility() == View.VISIBLE && cx < px(DOCK_X + 520)) target = wx;
+            else {
+                float best = Float.MAX_VALUE;
+                for (int i = 0; i < utils.getChildCount(); i++) {
+                    View u = utils.getChildAt(i);
+                    int[] l = new int[2];
+                    u.getLocationOnScreen(l);
+                    float d = Math.abs(l[0] + u.getWidth() / 2f - cx);
+                    if (d < best) { best = d; target = u; }
+                }
+            }
+            if (target != null && target.requestFocus()) { sounds.nav(fx); return true; }
+        }
+        // Down from the top icons always goes back to the dock (the weather, now selectable, sits nearer).
+        if (dir == View.FOCUS_DOWN && before.getParent() == utils && overlay.getVisibility() != View.VISIBLE) {
+            focusDock(lastDockFocus);
+            sounds.nav(fx);
+            return true;
+        }
         View next = before.focusSearch(dir);
         if (next != null && next != before) {
             ViewGroup root = (ViewGroup) getWindow().getDecorView();
@@ -3040,5 +3085,345 @@ public class HomeActivity extends Activity {
         g.setColor(color);
         g.setCornerRadius(radius);
         return g;
+    }
+
+    // ================================================================ weather: details and place
+
+    /**
+     * The weather can be selected (Left from the top icons, or Up from the dock). Resting on it opens a glass card
+     * with the details: feels-like, humidity, wind, rain, sunrise and sunset, the next hours and days. OK chooses
+     * the town.
+     */
+    FrameLayout wxCard;
+    final Runnable wxOpen = this::openWeatherCard;
+
+    boolean isDockTile(View v) {
+        for (int i = 0; i < shelfRow.getChildCount(); i++) if (shelfRow.getChildAt(i) == v) return true;
+        return false;
+    }
+
+    void setupWeatherFocus() {
+        wx.setFocusable(true);
+        wx.setClickable(true);
+        wx.setId(View.generateViewId());
+        wx.setNextFocusLeftId(wx.getId());
+        wx.setNextFocusUpId(wx.getId());
+        if (utils.getChildCount() > 0) {
+            View first = utils.getChildAt(0);
+            first.setNextFocusLeftId(wx.getId());
+            wx.setNextFocusRightId(first.getId());
+        }
+        wx.setOnFocusChangeListener((v, f) -> {
+            h.removeCallbacks(wxOpen);
+            if (f) h.postDelayed(wxOpen, 220);
+            else closeWeatherCard();
+        });
+        wx.setOnClickListener(v -> { clickSound(); closeWeatherCard(); showWeatherPlace(); });
+    }
+
+    void openWeatherCard() {
+        if (!wx.hasFocus() || overlay.getVisibility() == View.VISIBLE) return;
+        closeWeatherCardNow();
+        View content = weatherDetails();
+        if (content == null) {
+            // No detailed forecast yet: say so (and fetch it), so selecting the weather always shows something.
+            TextView wait = text(28, MUTE, f500, -.2f);
+            wait.setText("Getting the forecast…   OK to choose your town");
+            wait.setPadding(px(44), px(36), px(44), px(36));
+            content = wait;
+            wxFetching = false;
+            prefs.edit().putLong("wx_tried", 0).apply();
+            refreshWeather();
+        }
+        FrameLayout card = new FrameLayout(this);
+        GradientDrawable bg = round(0xE6101418, px(40));
+        bg.setStroke(Math.max(1, px(1.5f)), 0x33FFFFFF);
+        card.setBackground(bg);
+        card.addView(content, new FrameLayout.LayoutParams(MATCH, WRAP));
+        root.addView(card, root.indexOfChild(overlay), at(104, 40, 900, WRAP));
+        wxCard = card;
+        // It grows out of the weather, where you're looking.
+        card.setPivotX(px(60));
+        card.setPivotY(px(240));
+        card.setAlpha(0f);
+        card.setScaleX(.9f);
+        card.setScaleY(.9f);
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(Motion.SPRING).withLayer().start();
+        // The clock, date and weather it covers step away while it's open.
+        for (View v : new View[]{clock, date, wx}) v.animate().alpha(0f).setDuration(200).setStartDelay(0).start();
+    }
+
+    void closeWeatherCard() {
+        h.removeCallbacks(wxOpen);
+        final FrameLayout c = wxCard;
+        if (c == null) return;
+        wxCard = null;
+        for (View v : new View[]{clock, date, wx}) v.animate().alpha(1f).setDuration(260).setStartDelay(60).start();
+        c.animate().alpha(0f).scaleX(.96f).scaleY(.96f).setDuration(180).setInterpolator(Motion.IN).withLayer()
+                .withEndAction(() -> root.removeView(c)).start();
+    }
+
+    void closeWeatherCardNow() {
+        if (wxCard != null) { root.removeView(wxCard); wxCard = null; }
+    }
+
+    /** The card's contents, from the last forecast; null if there isn't one yet. */
+    View weatherDetails() {
+        try {
+            org.json.JSONObject j = new org.json.JSONObject(prefs.getString("wx_json", "{}"));
+            org.json.JSONObject cur = j.optJSONObject("current"), hr = j.optJSONObject("hourly"), dy = j.optJSONObject("daily");
+            if (cur == null || dy == null) return null;
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding(px(44), px(34), px(44), px(30));
+
+            String city = prefs.getString("wx_city", "");
+            TextView place = text(24, FAINT, f600, .8f);
+            place.setAllCaps(true);
+            place.setText(city.isEmpty() ? "Now" : city + "  ·  now");
+            col.addView(place);
+
+            int code = cur.optInt("weather_code"); boolean day = cur.optInt("is_day", 1) == 1;
+            LinearLayout head = new LinearLayout(this);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            ImageView ic = new ImageView(this);
+            ic.setImageDrawable(new Weather.Icon(Weather.kind(code), day, 0));
+            head.addView(ic, new LinearLayout.LayoutParams(px(96), px(96)));
+            TextView t = text(104, INK, f500, -4f);
+            t.setText(Math.round(cur.optDouble("temperature_2m")) + "°");
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(WRAP, WRAP);
+            tl.leftMargin = px(18);
+            head.addView(t, tl);
+            LinearLayout lines = new LinearLayout(this);
+            lines.setOrientation(LinearLayout.VERTICAL);
+            TextView cond = text(34, INK, f500, -.6f);
+            cond.setText(Weather.label(code));
+            lines.addView(cond);
+            TextView feels = text(26, MUTE, f500, -.2f);
+            feels.setText("Feels like " + Math.round(cur.optDouble("apparent_temperature")) + "°   ·   H "
+                    + Math.round(dy.getJSONArray("temperature_2m_max").getDouble(0)) + "°  L " + Math.round(dy.getJSONArray("temperature_2m_min").getDouble(0)) + "°");
+            LinearLayout.LayoutParams fl = new LinearLayout.LayoutParams(WRAP, WRAP);
+            fl.topMargin = px(6);
+            lines.addView(feels, fl);
+            LinearLayout.LayoutParams ll = new LinearLayout.LayoutParams(WRAP, WRAP);
+            ll.leftMargin = px(28);
+            head.addView(lines, ll);
+            LinearLayout.LayoutParams hl = new LinearLayout.LayoutParams(MATCH, WRAP);
+            hl.topMargin = px(6);
+            col.addView(head, hl);
+
+            // Four quick facts.
+            LinearLayout stats = new LinearLayout(this);
+            stats.setOrientation(LinearLayout.HORIZONTAL);
+            String rise = hhmm(dy.getJSONArray("sunrise").optString(0)), set = hhmm(dy.getJSONArray("sunset").optString(0));
+            int rain = dy.has("precipitation_probability_max") ? dy.getJSONArray("precipitation_probability_max").optInt(0) : -1;
+            String[][] facts = {
+                    {"Humidity", Math.round(cur.optDouble("relative_humidity_2m")) + "%"},
+                    {"Wind", Math.round(cur.optDouble("wind_speed_10m")) + " km/h"},
+                    {"Rain", rain < 0 ? "-" : rain + "%"},
+                    {"Sun", rise + "  –  " + set}};
+            for (String[] f : facts) stats.addView(fact(f[0], f[1]), new LinearLayout.LayoutParams(0, WRAP, f[0].equals("Sun") ? 1.5f : 1f));
+            col.addView(stats, divided(26));
+
+            // The next eight hours.
+            if (hr != null) {
+                org.json.JSONArray ht = hr.getJSONArray("time"), htemp = hr.getJSONArray("temperature_2m"), hcode = hr.getJSONArray("weather_code");
+                org.json.JSONArray hday = hr.optJSONArray("is_day");
+                String nowT = cur.optString("time", "");
+                int start = 0;
+                while (start < ht.length() && ht.getString(start).compareTo(nowT) <= 0) start++;
+                LinearLayout hours = new LinearLayout(this);
+                hours.setOrientation(LinearLayout.HORIZONTAL);
+                for (int i = start; i < Math.min(ht.length(), start + 8); i++) {
+                    boolean d = hday == null || hday.optInt(i, 1) == 1;
+                    hours.addView(slot(ht.getString(i).substring(11, 13), hcode.getInt(i), d, Math.round(htemp.getDouble(i)) + "°", null),
+                            new LinearLayout.LayoutParams(0, WRAP, 1f));
+                }
+                col.addView(hours, divided(22));
+            }
+
+            // The next five days.
+            org.json.JSONArray dt = dy.getJSONArray("time"), dmax = dy.getJSONArray("temperature_2m_max"), dmin = dy.getJSONArray("temperature_2m_min");
+            org.json.JSONArray dcode = dy.optJSONArray("weather_code");
+            LinearLayout days = new LinearLayout(this);
+            days.setOrientation(LinearLayout.HORIZONTAL);
+            SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd", Locale.US), out = new SimpleDateFormat("EEE", Locale.getDefault());
+            for (int i = 1; i < Math.min(dt.length(), 6); i++) {
+                String name = out.format(in.parse(dt.getString(i)));
+                days.addView(slot(name, dcode == null ? 3 : dcode.getInt(i), true, Math.round(dmax.getDouble(i)) + "°", Math.round(dmin.getDouble(i)) + "°"),
+                        new LinearLayout.LayoutParams(0, WRAP, 1f));
+            }
+            col.addView(days, divided(22));
+
+            TextView hint = text(22, FAINT, f500, 0);
+            hint.setText("OK to choose your town");
+            hint.setGravity(Gravity.END);
+            LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(MATCH, WRAP);
+            nl.topMargin = px(18);
+            col.addView(hint, nl);
+            return col;
+        } catch (Exception e) { return null; }
+    }
+
+    LinearLayout.LayoutParams divided(int top) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        lp.topMargin = px(top);
+        return lp;
+    }
+
+    static String hhmm(String iso) { return iso != null && iso.length() >= 16 ? iso.substring(11, 16) : "-"; }
+
+    View fact(String label, String value) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        TextView l = text(21, FAINT, f600, .6f);
+        l.setAllCaps(true);
+        l.setText(label);
+        c.addView(l);
+        TextView v = text(30, INK, f500, -.4f);
+        v.setText(value);
+        v.setSingleLine(true);
+        LinearLayout.LayoutParams vl = new LinearLayout.LayoutParams(WRAP, WRAP);
+        vl.topMargin = px(4);
+        c.addView(v, vl);
+        return c;
+    }
+
+    /** One column: a label, a small weather icon, and a temperature (with an optional low beneath). */
+    View slot(String label, int code, boolean day, String top, String bottom) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView l = text(22, MUTE, f500, 0);
+        l.setText(label);
+        c.addView(l);
+        ImageView ic = new ImageView(this);
+        ic.setImageDrawable(new Weather.Icon(Weather.kind(code), day, 0));
+        LinearLayout.LayoutParams il = new LinearLayout.LayoutParams(px(44), px(44));
+        il.topMargin = il.bottomMargin = px(6);
+        c.addView(ic, il);
+        TextView t = text(26, INK, f500, -.3f);
+        t.setText(bottom == null ? top : top + "  " + bottom);
+        if (bottom != null) {
+            android.text.SpannableString sp = new android.text.SpannableString(top + "  " + bottom);
+            sp.setSpan(new android.text.style.ForegroundColorSpan(FAINT), top.length() + 2, sp.length(), 0);
+            t.setText(sp);
+        }
+        c.addView(t);
+        return c;
+    }
+
+    /** Where the weather is for: the TV's own location, or a town you choose (found as you type). */
+    void showWeatherPlace() {
+        int w = px(720);
+        FrameLayout sh = sheet(.46f, w, true);
+        sh.setOutlineProvider(ViewOutlineProvider.BOUNDS);
+        sh.setClipToOutline(true);
+        View rim = new View(this);
+        rim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x8CFFFFFF, 0x30FFFFFF, 0x1AFFFFFF, 0x40FFFFFF}));
+        sh.addView(rim, new FrameLayout.LayoutParams(2, MATCH, Gravity.START));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(px(64), px(72), px(64), px(48));
+        TextView title = text(48, INK, f500, -1.5f);
+        title.setText("Weather location");
+        col.addView(title, new LinearLayout.LayoutParams(WRAP, px(64)));
+        boolean manual = "manual".equals(prefs.getString("loc_src", ""));
+        String city = prefs.getString("wx_city", "");
+        TextView sub = text(26, FAINT, f500, -.2f);
+        sub.setText((city.isEmpty() ? "" : "Now: " + city + (manual ? " (chosen)" : " (found automatically)") + "\n")
+                + "Type your town and pick it, or let the TV find its location.");
+        sub.setPadding(0, px(8), 0, px(24));
+        col.addView(sub);
+
+        android.widget.EditText field = new android.widget.EditText(this);
+        field.setSingleLine(true);
+        field.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(30));
+        field.setTypeface(f500);
+        field.setTextColor(INK);
+        field.setHintTextColor(FAINT);
+        field.setHint("Type a town");
+        field.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        field.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        field.setPadding(px(28), 0, px(28), 0);
+        GradientDrawable fbg = round(0x1FFFFFFF, px(32));
+        fbg.setStroke(Math.max(1, px(1.5f)), 0x33FFFFFF);
+        field.setBackground(fbg);
+        field.setOnFocusChangeListener((v, f) -> {
+            fbg.setColor(f ? 0x38FFFFFF : 0x1FFFFFFF);
+            fbg.setStroke(Math.max(1, px(1.5f)), f ? 0x99FFFFFF : 0x33FFFFFF);
+        });
+        LinearLayout.LayoutParams fl = new LinearLayout.LayoutParams(MATCH, px(68));
+        fl.bottomMargin = px(20);
+        col.addView(field, fl);
+
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        Glide[] g = new Glide[1];
+        sv.addView(pillBox(list, g));
+        col.addView(sv, new LinearLayout.LayoutParams(MATCH, 0, 1f));
+        TextView autoRow = sheetRow((manual ? "     " : "✓  ") + "Automatic (this TV's location)", g, () -> {
+            Weather.useAutomatic(prefs);
+            afterPlace("Weather: finding this TV's location");
+        });
+        list.addView(autoRow, placeRowLp());
+        if (manual && !city.isEmpty()) list.addView(sheetRow("✓  " + city, g, () -> dismissOverlay(false)), placeRowLp());
+        final int fixed = list.getChildCount();
+
+        final Runnable[] lookup = new Runnable[1];
+        lookup[0] = () -> {
+            final String q = field.getText().toString();
+            new Thread(() -> {
+                final List<Weather.Place> found = Weather.search(q);
+                h.post(() -> {
+                    if (!q.equals(field.getText().toString())) return; // typing moved on
+                    while (list.getChildCount() > fixed) list.removeViewAt(fixed);
+                    for (Weather.Place pl : found) {
+                        list.addView(sheetRow("     " + pl.label(), g, () -> {
+                            Weather.useTown(prefs, pl);
+                            afterPlace("Weather: " + pl.name);
+                        }), placeRowLp());
+                    }
+                    if (found.isEmpty() && q.trim().length() >= 2) {
+                        TextView none = text(26, FAINT, f500, -.2f);
+                        none.setText("No towns found for \u201C" + q.trim() + "\u201D");
+                        none.setPadding(px(28), px(16), 0, 0);
+                        list.addView(none);
+                    }
+                });
+            }).start();
+        };
+        field.addTextChangedListener(new PlaceWatcher(this, lookup));
+        field.setOnEditorActionListener((v, a, e) -> { h.removeCallbacks(lookup[0]); lookup[0].run(); return false; });
+        sh.addView(col, new FrameLayout.LayoutParams(MATCH, MATCH));
+        showOverlay(sh, new FrameLayout.LayoutParams(w, MATCH, Gravity.END), SHEET_PANEL, manual ? field : autoRow);
+    }
+
+    LinearLayout.LayoutParams placeRowLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, px(64));
+        lp.bottomMargin = px(4);
+        return lp;
+    }
+
+    /** Looks towns up a moment after typing pauses. */
+    static final class PlaceWatcher implements android.text.TextWatcher {
+        final HomeActivity a; final Runnable[] lookup;
+        PlaceWatcher(HomeActivity a, Runnable[] lookup) { this.a = a; this.lookup = lookup; }
+        @Override public void beforeTextChanged(CharSequence s, int st, int c, int af) { }
+        @Override public void onTextChanged(CharSequence s, int st, int b, int c) { }
+        @Override public void afterTextChanged(android.text.Editable s) {
+            a.h.removeCallbacks(lookup[0]);
+            a.h.postDelayed(lookup[0], 450);
+        }
+    }
+
+    void afterPlace(String msg) {
+        dismissOverlay(false);
+        showToast(msg);
+        wxFetching = false;
+        refreshWeather();
     }
 }

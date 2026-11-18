@@ -277,6 +277,7 @@ public class HomeKeyService extends AccessibilityService {
                 java.io.File tmp = new java.io.File(s.getFilesDir(), "avatar.tmp");
                 try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) { out.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, o); }
                 tmp.renameTo(new java.io.File(s.getFilesDir(), "avatar.png"));
+                Backup.saveAvatar(s, new java.io.File(s.getFilesDir(), "avatar.png"));
                 java.io.File hi = new java.io.File(s.getFilesDir(), "avatar.hi");
                 if (sharp) { try { new java.io.FileOutputStream(hi).close(); hi.setLastModified(System.currentTimeMillis()); } catch (Exception ignored) { } }
                 HomeActivity a = HomeActivity.live;
